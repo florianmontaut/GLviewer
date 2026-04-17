@@ -1,0 +1,42 @@
+
+┌──────────────────────┐
+│      SignalObject    │
+├──────────────────────┤
+│ - name               │
+│ - x : ndarray        │
+│ - y : ndarray        │
+│ - pipeline : List<> ─┼─────┐
+└──────────────────────┘     │
+                             │
+                             ▼
+                 ┌────────────────────────┐
+                 │      FilterNode (ABC)  │
+                 ├────────────────────────┤
+                 │ + signal_type : Enum   │◄──────────────┐
+                 │ + _params : dict       │               │
+                 │ + PARAMETER_SCHEMA     │               │
+                 ├────────────────────────┤               │
+                 │ + set_params()         │               │
+                 │ + get_param()          │               │
+                 │ + validate()           │               │
+                 │ + apply(x,y)           │               │
+                 │ + display_name         │               │
+                 │ + to_dict()            │               │
+                 │ + from_dict()          │               │
+                 └───────────▲────────────┘               │
+                             │                            │
+        ┌────────────────────┼────────────────────┐       │
+        │                    │                    │       │
+        ▼                    ▼                    ▼       │
+┌──────────────┐   ┌────────────────┐   ┌────────────────┐
+│ OffsetFilter │   │ LowPassFilter  │   │  DiffFilter    │
+├──────────────┤   ├────────────────┤   ├────────────────┤
+│ PARAM_SCHEMA │   │ PARAM_SCHEMA   │   │ PARAM_SCHEMA   │
+│ offset:float │   │ cutoff: float  │   │ reference:     │
+│              │   │ fs: float      │   │   SignalObject │
+├──────────────┤   │ order: int     │   ├────────────────┤
+│ display_name │   ├────────────────┤   │ validate()     │
+│ apply()      │   │ validate()     │   │ apply()        │
+└──────────────┘   │ apply()        │   │ display_name   │
+                   │ display_name   │   └────────────────┘
+                   └────────────────┘

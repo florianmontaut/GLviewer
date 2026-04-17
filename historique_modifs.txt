@@ -1,0 +1,76 @@
+﻿##########################
+#10/03/2026:
+¤ deuxième bug du au typage des éléments transmis via les signaux ! Si un object peux devenir None au lieu de son typage usuel, il est nécessaire
+de passer un type objet !
+
+##########################
+#26/03/2026:
+¤ mise en place du serializer/deserializer JSON pour la sauvegarde/chargement des fichiers
+=> ré-écriture des FilterNode, sérialisation de QPen, et résolution de la problématique du Diff_Filter n'ayant pas de signal de comparaison au chargement mais seulement le nom du signal.
+
+##########################
+#25/03/2026:
+¤ mise en place des menus contextuels  (main_controller, graph_controller,tree_controller):
+=> ajout des menus contextuels avec vérification dynamique des conditions d'activation des actions (item sélectionné ? réf existante)
+
+¤ mise en place du pipeline de modification (main_controller, pipeline_controller)
+
+¤ correction d'un bug du menu recent files (menu_controller)
+=> mauvaise utilisation de lambda avec plusieurs argument: f_path était correctement lié grâce à path=f_path mais pas f_type. On se retrouve avec un méthode qui ne renvoyait pas sur le bon fichier. 
+=> utilisation d'un méthode supplémentaire _on_recent_file_triggered(self) et de l'attribut data d'un QAction: on vient charger le tuple (f_type,f_path) dans QAction et c'est ce tuple que l'on récupère. ATTENTION NE MARCHE QU'AVEC UNE CLASSE QOBJECT, en effet on récupère QAction via self.sender()
+
+¤ correction (protection) du bug provoquant le crash de l'appli (graph_controller)
+=> le tickage fixe des axes rends l'application très sensible au zoom et dé-zoom provoquant (Qt recalcule la largeur minimum d'affichage des axes et arrive un moment ou la valeur est suffisamment faible pour le faire planter.)
+
+##########################
+#24/03/2026:
+
+$=>NON IMPLEMENTEE CAR RESULTATS NON SATISFAISANT
+$¤ modification du code afin qu'un clic droit ne soit pas considéré comme une sélection
+$=> création d'un classe héritant de TreeView et surchargeant le mouseEvent() et clickEvent()
+$=> le fonctionnnement du nouveau Widget rentrait en conflit avec la méthode highlight et autre
+$=>NON IMPLEMENTEE CAR RESULTATS NON SATISFAISANT
+
+¤ mise en place des menus contextuels  (main_controller, graph_controller):
+=> ajout des menus contextuels repris de GLviewer_CustomWidget
+
+
+¤ mise en place du pipeline de modification  (main_controller, PipelineTreeModel):
+=>modification de la méthode _on_signal_selected (main_controller) et de l'objet PipelineTreeModel avec l'ajout d'un dictionnaire permettant de faire un lien entre sig et TreeItem index. 
+=>QSignalBlocker dans la méthode _on_signal_selected évite tout rebouclage infini: sélection d'un item dans le treeView => modification de la sélection => appel de la méthode _on_signal_selected => nouvelle boucle
+
+¤ mise en place de la récupération et mise à jour des options (main_controller, import_controller, main_window, menu_controller):
+=>basculement des options du main_windows vers le graph_controller
+=>passage des settings aux différents contrôleur
+¤ gestion du fileDialog (main_controller, import_controller):
+=>basculement de la méthode load_file_dialog du main_controller vers l'import_controller afin de faciliter la gestion des différentes options d'adresse par défaut:
+le répertoire du dernier fichier chargé, le répertoire défini par l'utilisateur et le fichier par défaut (répertoire de l'appli)
+
+##########################
+#23/03/2026:
+
+¤ gestion de la mise à jour des curseurs à la sélection d'un nouveau signal (main_controller): 
+=> Ajout d'un appel à update_x du cursor_ctrl (ligne 188) dans la méthode_on_signal_selected afin d'automatiquement mettre à jour le curseur horizontal (fixé par le calcul en Y)
+=> Ajout d'un test self.model.cursor_x is None (ligne 185) pour gérer la première apparition du curseur (peut être amélioré de manière à utiliser la position du curseur.
+
+¤ amélioration des performances de MAJ des valeurs Y: 
+=> dans la méthode updateCursorVal on vient receuillir l'ensemble des valeurs Y des différents dataframe au lieu de faire la recherche signal par signal
+=> pour la MAJ des valeurs des signaux, on se contente de venir scruter le dictionnaire cursor_Y_values_by_file au bon index (index donné par la position du signal dans la dataframe).
+
+¤ correction d'un bug dans la méthode new_file (main_controller):
+=>la méthode add_file_subtree attend un FileObject et jusqu'à présent, file_struct lui était envoyé
+
+¤ correction d'un bug dans la méthode add_file_subtree (tree_model):
+=>la méthode add_file_subtree ne mettait pas à jour automatiquement l'affichage du TreeView, pour cela il fallait encadrer l'ajout du fileItem et sigItem par les méthodes beginInsertRows puis endInsertRows
+
+¤ ajout de la deuxième colonne des valeurs dans le tableau (tree_model et main_controller):
+=>la méthode columnCount a été mise à jour de manière à renvoyer 2 (il serait intéressant de faire un décompte automatique). La largeur des colonnes à du être modifiées afin de permettre l'affichage du nom des signaux (méthode new_File de main_controller): header. SetStretchLastSection etc...
+
+##########################
+#22/03/2026:
+¤ gestion de l'affichage de fichiers multiples (graph_controller): 
+*correction du bug où les courbes des enregristrement précédent (i.e déjà chargé dans l'utilitaire) ne pouvaient plus être masqués (en réalité le graph_controller
+recréait des nouvelles courbes pour un même signal).
+=> Ajout d'une vérification sur la création des plotDataItem: on ne créé 'curve' que si l'objet 'sig' (signal) n'existe pas dans le dictionnaire self.curves. 
+¤ gestion des fichiers récents (menu_controller + main_controller):
+=> Ajout d'un type de loader/de fichier dans le .json des fichiers récents.

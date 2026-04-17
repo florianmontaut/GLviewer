@@ -1,0 +1,10 @@
+
+<RCC>
+  <qresource prefix="/icons">
+    <file>icons/file.svg</file>
+    <file>icons/signal_raw.svg</file>
+    <file>icons/signal_modified.svg</file>
+    <file>icons/filter.svg</file>
+    <file>icons/wabtec.ico</file>
+  </qresource>
+</RCC>
