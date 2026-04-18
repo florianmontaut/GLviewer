@@ -142,10 +142,8 @@ class ActionRegistry:
                                     index,
                                     st=sig_type: ModifyAnalysisCommand(
                                                                             sig,
-                                                                            st,
+                                                                            params,
                                                                             model,
                                                                             index
                                                                         )
                         )
-            
-

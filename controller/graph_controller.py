@@ -4,7 +4,7 @@
 from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
-from model.base_objects import SignalObject
+from model.base_objects import SignalObject,DerivedSignalObject
 from ressources.custom_menu import SelectionState
 from ressources import custom_graph_functions,custom_types
 
@@ -43,7 +43,7 @@ class GraphController(QtCore.QObject):
     cursor_moved_X          = QtCore.pyqtSignal(float)
     menu_actions_triggered  = QtCore.pyqtSignal(    custom_types.ActionModifier,
                                                     custom_types.qSignalType,
-                                                    object)  
+                                                    object)
 
     def __init__(self, graph_widget : pg.GraphicsLayoutWidget, graphtree : ptree ,**opts):
         super().__init__()
@@ -152,7 +152,7 @@ class GraphController(QtCore.QObject):
         self.vb.autoRange()
 
     # ----------------------------------------------------
-    def add_signal_curve(self, sig: SignalObject):
+    def add_signal_curve(self, sig: SignalObject|DerivedSignalObject):
 
         if sig not in self.curves.keys():
             curve = pg.PlotDataItem(sig.x, sig.y, pen=sig.pen)
@@ -215,7 +215,7 @@ class GraphController(QtCore.QObject):
             # Highlight the new signal: double its current width (which should match sig.pen.width() if not previously highlighted)
             double_width = int(curve.opts['pen'].width() * 2)
             custom_graph_functions.updateCurve(curve, width=double_width, z_val=10)
-            
+
             # Deselect the old signal
             if self.old_highlight is not None:
                 old_curve = self.curves[self.old_highlight]
@@ -233,7 +233,7 @@ class GraphController(QtCore.QObject):
             # Update tracking variables
             self.old_highlight = sig
             self.old_highlight_width = sig.pen.width()  # Store the original width for the new highlight
-            
+
     def remove_signal_curve(self, signal):
         curve = self.curves.pop(signal, None)
         if curve:

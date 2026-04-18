@@ -6,7 +6,7 @@ from operator import index
 import pandas as pd
 from PyQt6 import QtCore,QtGui
 
-from model.base_objects import FileObject, SignalObject,Workspace
+from model.base_objects import DerivedSignalObject, FileObject, SignalObject,Workspace
 from model.tree_model import PipelineTreeModel
 
 from controller.tree_controller import TreeController
@@ -79,6 +79,9 @@ class MainController(QtCore.QObject):
     # MENU FILE
     # -------------------------------------------------------------------------
     def _connect_UI_actions(self):
+        """
+        Connecte les actions de la barre de menu à des slots du MainController.
+        """
 
         self.view.actionLoad_csv.triggered.connect(lambda: self.import_ctrl.load_file_dialog(
                                                     custom_types.fileType.GL))
@@ -101,6 +104,9 @@ class MainController(QtCore.QObject):
     # -------------------------------------------------------------------------
 
     def _init_undo_redo(self):
+        """
+        Initialise les actions Undo/Redo liées à la pile d'actions du WorkspaceController.
+        """
         self.undo_action = self.workspace_ctrl.undo_stack.createUndoAction(self.view, "Undo")
         self.redo_action = self.workspace_ctrl.undo_stack.createRedoAction(self.view, "Redo")
         self.undo_action.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
@@ -116,6 +122,10 @@ class MainController(QtCore.QObject):
         #self.edit_menu.addAction(self.redo_action)
 
     def add_file(self,file_obj:FileObject):
+        """
+        Ajoute un fichier au workspace, construit le modèle Qt associé et met à jour la vue.
+            - file_obj : FileObject à ajouter
+        """
 
         if self.workspace is None:
             self.create_workspace()
@@ -142,18 +152,22 @@ class MainController(QtCore.QObject):
         self.workspace_ctrl = WorkspaceController(self.model)
         # Create undo/redo actions linked to the stack
         self._init_undo_redo()
-
-        self.workspace_ctrl.pipeline_changed.connect(self._on_visibility_changed)
-        self.workspace_ctrl.analysis_changed.connect(self._on_visibility_changed)
-        self.workspace_ctrl.macro_created.connect(self._on_macro_created)
+        self._connect_workspace_signals()
         # Ajouter toutes les courbes au graph
         for file_obj in self.workspace.files:
             for sig in file_obj.signals:
                 self.graph_ctrl.add_signal_curve(sig)
+                for analysis in sig.analyses:
+                    derived = analysis.compute(sig)
+                    sig.derived_signals.append(derived)
+                    self.graph_ctrl.add_signal_curve(derived)
         self.graph_ctrl.update_vbox()
 
 
     def create_workspace(self,workspace:Workspace):
+        """
+        Créer un nouveau workspace et l'attacher à tous les contrôleurs.
+        """
 
         self.workspace=workspace
         self.model = PipelineTreeModel(self.workspace)
@@ -164,32 +178,47 @@ class MainController(QtCore.QObject):
 
         # Create undo/redo actions linked to the stack
         self._init_undo_redo()
-        self.workspace_ctrl.pipeline_changed.connect(self._on_visibility_changed)
-        self.workspace_ctrl.analysis_changed.connect(self._on_visibility_changed)
-        self.workspace_ctrl.macro_created.connect(self._on_macro_created)
+        self._connect_workspace_signals()
 
         for file_obj in self.workspace.files:
             self.menu_ctrl.save_recent_file_address([file_obj.item_type,file_obj.address])
             for sig in file_obj.signals:
                 self.graph_ctrl.add_signal_curve(sig)
+                for analysis in sig.analyses:
+                    derived = analysis.compute(sig)
+                    sig.derived_signals.append(derived)
+                    self.graph_ctrl.add_signal_curve(derived)
         self.graph_ctrl.update_vbox()
 
     # -------------------------------------------------------------------------
     # TREE SIGNALS
     # -------------------------------------------------------------------------
 
+    def _connect_workspace_signals(self):
+        """
+        Connecte les signaux émis par le WorkspaceController à des slots du MainController.
+        """
+        self.workspace_ctrl.pipeline_changed.connect(self._on_visibility_changed)
+        self.workspace_ctrl.analysis_changed.connect(self._on_visibility_changed)
+        self.workspace_ctrl.macro_created.connect(self._on_macro_created)
+
     def _connect_tree_signals(self):
+        """
+        Connecte les signaux émis par le TreeController à des slots du MainController.
+        """
 
         self.tree_ctrl.item_selected.connect(lambda data : self._on_item_selected(*data))
         self.tree_ctrl.visibility_changed.connect(self._on_visibility_changed)
         self.tree_ctrl.menu_actions_triggered.connect(self._action_concentrator)
 
     def _on_item_selected(self, file, sig , node_index=None, analysis_index=None ):
-        """Un signal a été sélectionné dans l'arbre."""
+        """
+        Un signal a été sélectionné dans l'arbre.
+        """
 
         if file is not None:
             #? dans ce cas, on veut éditer les paramètres d'un fichier spécifique
-            self.param_ctrl.load_params(file,None,None)
+            self.param_ctrl.load_params(file,node_index,analysis_index)
             return
         if node_index is None:
             index = self.model.signal_index_map.get(sig)
@@ -206,10 +235,7 @@ class MainController(QtCore.QObject):
             # Mise à jour du controleur du curseur (on l'attache à la courbe)
             self.cursor_ctrl.set_signal(sig)
             # Chargement des paramètres dans le parameterTree
-            self.param_ctrl.load_params(sig,None,None)
-            # Si n'a jamais été chargé auparavant (avant la première sélection d'un signal)
-            # on charge tout la colonne 1 (valeur des courbes à la position X du curseur)
-            # en prenant une X = 0 et par la même occasion chargant cursor_x à 0
+            self.param_ctrl.load_params(sig,node_index,analysis_index)
             if self.model.cursor_x is None:
                 self.model.updateCursorVal(float(self.graph_ctrl.mouse_pos.x()))
 
@@ -226,12 +252,16 @@ class MainController(QtCore.QObject):
             self.view.treefile.viewport().update()
         elif analysis_index is None:
             print(f'analysis_index is None')
-            self.param_ctrl.load_params(sig, node_index,None)
+            self.param_ctrl.load_params(sig, node_index,analysis_index)
         else:
             print(f'analysis_index is: {analysis_index}')
-            self.param_ctrl.load_params(sig, None,analysis_index)
+            self.param_ctrl.load_params(sig, node_index,analysis_index)
 
     def _on_visibility_changed(self, signal, index=None):
+        """
+        Un filtre ou une analyse a été ajouté(e) ou modifié(e), il faut mettre à jour la
+        courbe correspondante.
+        """
         if isinstance(signal,TreeItem):
             sig=signal.data
         else:
@@ -247,13 +277,10 @@ class MainController(QtCore.QObject):
         index = self.view.treefile.currentIndex()
         if not index.isValid():
             return
-
         item = index.internalPointer()
         obj = item.data
-
         # Si l'utilisateur a sélectionné un signal ou un filtre,
         # on remonte au FileObject parent
-
         if isinstance(obj, SignalObject):
             file_obj = obj.file
         elif isinstance(obj, FileObject):
@@ -286,6 +313,9 @@ class MainController(QtCore.QObject):
     # Import FILE
     # -------------------------------------------------------------------------
     def _connect_import_signals(self):
+        """
+        Connecte les signaux émis par le ImportController à des slots du MainController.
+        """
         self.import_ctrl.file_signal.connect(self.add_file)
         self.import_ctrl.project_signal.connect(self.create_workspace)
 
@@ -293,11 +323,17 @@ class MainController(QtCore.QObject):
     # Menu Bar signals
     # -------------------------------------------------------------------------
     def _connect_menu_signals(self):
+        """
+        Connecte les signaux émis par le MenuController à des slots du MainController.
+        """
         #? Envoi direct à un autre controller sans vérification du main_controller ?
         self.menu_ctrl.loadSignal.connect(self.import_ctrl.load_file_dialog)
         self.menu_ctrl.newOptions.connect(self._on_new_settings)
 
     def _on_new_settings(self, settings: dict):
+        """
+        Slot appelé lorsque l'utilisateur modifie les options dans le MenuController.
+        """
         self.settings = settings
         self.import_ctrl.updateOptions(settings)
         self.graph_ctrl.updateOptions(settings)
@@ -306,15 +342,17 @@ class MainController(QtCore.QObject):
     # GRAPH SIGNALS
     # -------------------------------------------------------------------------
     def _connect_graph_signals(self):
-        self.graph_ctrl.curve_selected.connect(lambda sig: self._on_item_selected(  None,
-                                                                                    sig,
-                                                                                    None,
-                                                                                    None))
+        """
+        Connecte les signaux émis par le GraphController à des slots du MainController.
+        """
+        self.graph_ctrl.curve_selected.connect(lambda sig:
+                                                self._on_item_selected(None,sig,None,None))
         self.graph_ctrl.cursor_moved_X.connect(self._on_cursor_moved)
         self.graph_ctrl.menu_actions_triggered.connect(self._action_concentrator)
 
 
     def _connect_cursor_signals(self):
+
         # Graph + modèle se mettent à jour quand la logique curseur a calculé y
         self.cursor_ctrl.cursor_moved.connect(self._on_cursor_computed)
 
@@ -347,6 +385,10 @@ class MainController(QtCore.QObject):
         self.param_ctrl._params_changed.connect(self._on_param_changed)
 
     def _on_param_changed(self, signal, filter_index, analysis_index, new_params):
+        """
+        Slot appelé lorsque l'utilisateur modifie un paramètre dans le ParameterController.
+        """
+
 
         """Modification des paramètres d'une analyse."""
         if filter_index is None and analysis_index is None:
@@ -417,7 +459,9 @@ class MainController(QtCore.QObject):
     # -------------------------------------------------------------------------
 
     def _current_signal(self):
-        """Retourne le signal actuellement sélectionné dans la TreeView."""
+        """
+        Retourne le signal actuellement sélectionné dans la TreeView.
+        """
         sel = self.view.treefile.selectionModel().selectedIndexes()
         if not sel:
             return None
@@ -428,7 +472,9 @@ class MainController(QtCore.QObject):
         return None
 
     def _rebuild_model(self):
-        """Reconstruit l'arborescence (utile après reorder)."""
+        """
+        Reconstruit l'arborescence (utile après reorder).
+        """
         if not self.workspace:
             return
         new_model = PipelineTreeModel(self.workspace)
@@ -485,6 +531,10 @@ class MainController(QtCore.QObject):
                                 )
 
     def _action_concentrator(self,modifier,action_type,macro_name=None):
+        """
+        Centralise les actions de menu liées aux signaux (isoler, définir comme référence,
+        supprimer, appliquer macro, etc.).
+        """
 
         signal = self._current_signal()
         if signal is None:
@@ -517,6 +567,23 @@ class MainController(QtCore.QObject):
 
 
     def _build_action_request(self, action_type, signal):
+        """
+        Méthode générant les actionRequests nécessaire à la création des Nodes
+        filter ou analysis qui puissent être annulées via le undo du workspace controller,
+        elle centralise également la logique de demande de paramètres
+        (ex: cutoff pour les filtres, signal de référence pour les diff, etc.)
+
+        Args:
+            action_type (custom_types.qSignalType): type d'action à réaliser (ajout de filtre,
+                                                    ajout d'analyse, etc.)
+            signal (SignalObject|DerivedSignalObject): signal concerné par l'action
+
+        Returns:
+            custom_items.ActionRequest: structure de données contenant toutes les informations
+            nécessaires à la création d'un Node dans le modèle du pipeline, elle est ensuite
+            traitée par le workspace controller pour faire les modifications métier et
+            mise à jour de la vue
+        """
 
         #ajout d'un filterNode nécessitant des paramètres par défaut
         if action_type in (
@@ -538,7 +605,21 @@ class MainController(QtCore.QObject):
                                             params = {},
                                             index = None)
 
-    def _ask_filter_params(self,action_type,sig:SignalObject):
+    def _ask_filter_params(self,action_type,sig:SignalObject)->dict:
+        """_summary_
+
+        Args:
+            action_type (custom_types.qSignalType): type d'action à réaliser (ajout de filtre,
+                                                    ajout d'analyse, etc.)
+            sig (SignalObject): signal concerné par l'action
+
+        Raises:
+            AttributeError: _description_
+
+        Returns:
+            dict: dictionnaire contenant les paramètres nécessaires à la création du Node
+            (ex: cutoff pour les filtres, signal de référence pour les diff, etc.)
+        """
 
         match action_type:
 

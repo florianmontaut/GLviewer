@@ -1,5 +1,5 @@
 
-#import uuid
+import uuid
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
@@ -23,7 +23,7 @@ class ThermalModelAnalysis(AnalysisNode):
     Analyse thermique RC (1er ordre) sur un signal temporel.
     """
     # Réutilise un type existant ou ajoute un nouveau
-    action_type = custom_types.qSignalType.MODEL  
+    action_type = custom_types.qSignalType.MODEL
     PARAMETER_SCHEMA = {
         "Model": {
                         "type": "list",
@@ -42,7 +42,7 @@ class ThermalModelAnalysis(AnalysisNode):
 
     def __init__(self, label=None):
 
-        #self.id = uuid.uuid4().hex[:8]
+        self.id = uuid.uuid4().hex[:8]
         super().__init__()
         self.t_start = None
         self.t_end = None
@@ -189,14 +189,14 @@ class ThermalModelAnalysis(AnalysisNode):
         """
         # Utilise les données après pipeline
         x = parent_signal.x
-        y = parent_signal.y 
-        
+        y = parent_signal.y
+
         if self.t_start is None:
             self.t_start = x[0]
         if self.t_end is None:
             self.t_end = x[-1]
         self.results=self.run(x,y,100)
-        
+
         if self.results is None:
             raise RuntimeError("Model not computed")
 
@@ -213,9 +213,10 @@ class ThermalModelAnalysis(AnalysisNode):
         metadata = {
                                 "type": "thermal_model",
                                 "source": parent_signal.name,
+                                "analysis_id": self.id,
+                                "params": self.to_dict()
                             }
-        
-        metadata.update(self.results.to_dict())
+
         print(metadata)
         model_signal = DerivedSignalObject(
                                     parent_signal=parent_signal,
@@ -232,7 +233,7 @@ class ThermalModelAnalysis(AnalysisNode):
 class ThermalAnalysis(AnalysisNode):
     """Analyse thermique : ajuste un modèle RC et extrapole à l'asymptotique."""
     # Réutilise un type existant ou ajoute un nouveau
-    action_type = custom_types.qSignalType.MODEL  
+    action_type = custom_types.qSignalType.MODEL
     PARAMETER_SCHEMA = {
         "Model Type": {
             "type": "list",

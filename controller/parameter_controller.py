@@ -65,9 +65,10 @@ class ParameterController(QObject):
                                     new_params,
                                 )
 
-    def load_params(self, sig: SignalObject|FileObject, index: int|None = None,
-                    analysis_index: int | None = None):
-        
+    def load_params(self,   sig: SignalObject|FileObject,
+                            index: int|None = None,
+                            analysis_index: int | None = None):
+
         print(f'\n {self.sender()}')
 
         #! ajouter la gestion des FileObject içi aussi pour pouvoir éditer les paramètres globaux du fichier
@@ -90,9 +91,9 @@ class ParameterController(QObject):
         print(f'signal: {sig.name} / index {index} / analysis index {analysis_index}')
         self.param.sigTreeStateChanged.connect(
             lambda *_: self._on_param_change(sig, index, analysis_index))
-        
+
         self.widget.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
-        
+
 
     def _on_action_triggered(self,action):
         """

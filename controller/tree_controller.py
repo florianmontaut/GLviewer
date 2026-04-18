@@ -56,6 +56,30 @@ class TreeController(QtCore.QObject):
         self.model.dataChanged.connect(self._on_checkbox_changed)
 
     # ----------------------------------------------------------
+    def _resolve_signal_node_index(self, item):
+        """Retourne l'index métier d'un nœud Filter/Analysis pour le Signal associé."""
+        obj = item.data
+        if isinstance(obj, FilterNode):
+            sig = item.parent.data
+            try:
+                return (None, sig, sig.pipeline.index(obj), None)
+            except ValueError:
+                return (None, sig, None, None)
+
+        if isinstance(obj, AnalysisNode):
+            sig = item.parent.data
+            print(f"Signal associé à l'analyse : {sig.display_name} / nombre d'analyses : {len(sig.analyses)}")
+            try:
+                return (None, sig, None, sig.analyses.index(obj))
+            except ValueError as e:
+                print(f"Erreur lors de la recherche de l'analyse : {e}")
+                return (None, sig, None, None)
+
+        if isinstance(obj, SignalObject):
+            return (None, obj, None, None)
+
+        return (obj, None, None, None)
+
     def _on_selection_changed(self, selected=None, deselected=None):
         if selected is not None:
             if not selected.indexes():
@@ -66,35 +90,17 @@ class TreeController(QtCore.QObject):
             obj = item.data
             print(  f'Item sélectionné: {obj.display_name} / {type(obj)} /'+
                     f'{isinstance(obj, AnalysisNode)}')
-            # FILTRE sélectionné
-            if isinstance(obj, FilterNode):
-                sig_item = item.parent
-                sig = sig_item.data
-                filter_index = sig_item.children.index(item)
-                self.item_selected.emit((None,sig, filter_index, None))
-                
 
-            # ✅ ANALYSE sélectionnée
-            elif isinstance(obj, AnalysisNode):
-                sig_item = item.parent
-                sig = sig_item.data
-                print(f'nombre d\'analyse:{len(sig.analyses)}')
-                analysis_index = sig_item.children.index(item)
-                print(f'Index de l\'analysisNode: {analysis_index}')
-                self.item_selected.emit((None, sig, None, analysis_index))
+            result = self._resolve_signal_node_index(item)
+            self.item_selected.emit(result)
 
-            # Signal selected
-            elif isinstance(obj, SignalObject):
-                self.item_selected.emit((None, obj, None, None))
-            else:
-                self.item_selected.emit((obj,None, None, None))
             self.checkStates(obj)
         else:
             self.checkStates()
 
     def checkStates(self,selected=None):
         if selected is not None:
-            
+
             #? faut-il vraiment interdire l'accès aux actions si un filtre est sélectionné
             if isinstance(selected,SignalObject):
                 ref = [sig for sig in selected.file.signals if sig.is_reference]
@@ -110,7 +116,7 @@ class TreeController(QtCore.QObject):
         else:
             has_select = False
             has_ref= False
-        
+
         states = SelectionState(
                                     has_selection = has_select ,
                                     has_reference = has_ref,
