@@ -12,14 +12,17 @@ from model.analysis.base_analysis import AnalysisNode
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from model.base_objects import SignalObject
+from ressources.custom_items import itemType
 
 PATH=pathlib.Path(__file__).parent.parent
 
 
 class PipelineTreeModel(QAbstractItemModel):
 
-    new_filter=pyqtSignal(object,object)
-    changed_filter=pyqtSignal(object,object)
+    new_filter          = pyqtSignal(object,object,object)
+    changed_filter      = pyqtSignal(object,object)
+    new_analysis        = pyqtSignal(object,object,object)
+    changed_analysis    = pyqtSignal(object,object)
 
     def __init__(self, workspace: Workspace, parent=None):
         super().__init__(parent)
@@ -31,7 +34,7 @@ class PipelineTreeModel(QAbstractItemModel):
         self.icon_signal_modified   = QIcon(str(PATH)+"/ressources/icons/signal_modified.svg")
         self.icon_filter            = QIcon(str(PATH)+"/ressources/icons/filter.svg")
         self.icon_signal_reference  = QIcon(str(PATH)+"/ressources/icons/signal_reference.svg")
-
+        #! Comment le code peut-il fonctionner sans erreur, TreeItem attend data, role et parent:
         self.root = TreeItem("Workspace")
 
         #curseur Global
@@ -60,7 +63,7 @@ class PipelineTreeModel(QAbstractItemModel):
         row = self.root.child_count()  # position d'insertion
 
         self.beginInsertRows(root_index, row, row)
-        file_item = TreeItem(file_obj, self.root)
+        file_item = TreeItem(file_obj, parent= self.root)
         self.root.add_child(file_item)
 
         # Ajouter les signaux
@@ -77,7 +80,7 @@ class PipelineTreeModel(QAbstractItemModel):
     # ----------------- Build signal subtree -----------------
 
     def add_signal_subtree(self, sig: SignalObject, parent:TreeItem):
-        sig_item = TreeItem(sig, parent)
+        sig_item = TreeItem(sig, parent= parent)
         parent.add_child(sig_item)
 
         # ✅ on mémorise l'index
@@ -86,19 +89,25 @@ class PipelineTreeModel(QAbstractItemModel):
 
 
         for node in sig.pipeline:
-            filter_item = TreeItem(node, sig_item)
+            filter_item = TreeItem( node,
+                                    parent = sig_item,
+                                    )
             sig_item.add_child(filter_item)
 
         # --- Analyses ---
         for analysis in sig.analyses:
-            analysis_item = TreeItem(analysis, sig_item)
+            analysis_item = TreeItem(   analysis,
+                                        parent = sig_item,
+                                    )
             sig_item.add_child(analysis_item)
 
             # Ajouter les signaux DÉRIVÉS de cette analyse
             for derived_sig in sig.derived_signals:
                 if (hasattr(derived_sig, 'metadata') and
                     derived_sig.metadata.get('analysis_id') == analysis.id):
-                    derived_item = TreeItem(derived_sig, analysis_item)
+                    derived_item = TreeItem(derived_sig,
+                                            parent = analysis_item,
+                                            )
                     analysis_item.add_child(derived_item)
 
     def remove_file_subtree(self, file_obj):
@@ -176,18 +185,19 @@ class PipelineTreeModel(QAbstractItemModel):
         #print(origine)
         item = index.internalPointer()
         obj = item.data
+        obj_type : itemType = obj.item_type
         col = index.column()
 
         # ---------------- colonne 0 : nom ----------------
         if role == Qt.ItemDataRole.DisplayRole and col == 0:
-            if isinstance(obj, (FilterNode, AnalysisNode)):
+            if obj_type in (itemType.ANALYSE, itemType.FILTER):
                 return obj.display_name
             else:
                 return obj.name
 
         # ---------------- colonne 1 : valeur au curseur ----------------
         if role == Qt.ItemDataRole.DisplayRole and col == 1:
-            if isinstance(obj, SignalObject):
+            if obj_type == itemType.RAW:
                 if self.cursor_x is None:
                     return "-"
 
@@ -201,7 +211,7 @@ class PipelineTreeModel(QAbstractItemModel):
 
 
         if role == Qt.ItemDataRole.FontRole:
-            if isinstance(obj, SignalObject) and obj.is_selected:
+            if  obj.is_selected:
                 font = QFont()
                 font.setBold(True)
                 return font
@@ -213,12 +223,13 @@ class PipelineTreeModel(QAbstractItemModel):
                 return QBrush(QColor("#000000"))  # noir profond
 
     # ---------------- Checkbox ----------------
-        if role == Qt.ItemDataRole.CheckStateRole and isinstance(obj, SignalObject) and col == 0:
+        if (role == Qt.ItemDataRole.CheckStateRole and obj_type == itemType.DERIVED and
+            obj_type == itemType.RAW and col == 0):
             return Qt.CheckState.Checked if obj.visible else Qt.CheckState.Unchecked
 
     # ---------------- Background color ----------------
         if role == Qt.ItemDataRole.BackgroundRole:
-            if isinstance(obj, SignalObject):
+            if obj_type == itemType.RAW:
                 # Couleur de fond = couleur du signal
                 color = QColor(obj.pen.color())
                 # léger alpha pour rester lisible
@@ -229,11 +240,11 @@ class PipelineTreeModel(QAbstractItemModel):
         if role == Qt.ItemDataRole.DecorationRole and col == 0:
 
             # FileObject
-            if isinstance(obj, FileObject):
+            if obj_type == itemType.FILE:
                 return self.icon_file
 
             # SignalObject
-            if isinstance(obj, SignalObject):
+            if obj_type == itemType.RAW:
 
                 if obj.is_reference:
                     return self.icon_signal_reference
@@ -243,7 +254,7 @@ class PipelineTreeModel(QAbstractItemModel):
                     return self.icon_signal_raw
 
             # FilterNode
-            if isinstance(obj, FilterNode):
+            if obj_type == itemType.FILTER:
                 return self.icon_filter
 
         return None
@@ -271,8 +282,9 @@ class PipelineTreeModel(QAbstractItemModel):
 
         item = index.internalPointer()
         obj = item.data
+        obj_type = obj.item_type
 
-        if isinstance(obj, SignalObject) and role == Qt.ItemDataRole.CheckStateRole:
+        if obj_type == itemType.RAW and role == Qt.ItemDataRole.CheckStateRole:
             #value est un int ! pas un Qt.CheckState, il faut donc utiliser la méthode .value
             #afin de récupèrer l'int équivalent de enum Qt.CheckState
             obj.visible = (value == Qt.CheckState.Checked.value)
@@ -310,11 +322,11 @@ class PipelineTreeModel(QAbstractItemModel):
                                     self.index(sig_item.parent.row(), 0, QModelIndex()))
 
         self.beginInsertRows(parent_index, index, index)
-        filter_item = TreeItem(filter_node, sig_item)
+        filter_item = TreeItem(filter_node, parent = sig_item)
         sig_item.children.insert(index, filter_item)
         self.endInsertRows()
 
-        self.new_filter.emit(sig_item,index)
+        self.new_filter.emit(sig_item,index,parent_index)
 
     def remove_filter(self, sig: SignalObject, index: int):
         sig_item = self._find_item(self.root, sig)
@@ -353,13 +365,13 @@ class PipelineTreeModel(QAbstractItemModel):
         model_index = self.index(index, 0, parent_index)
 
         self.dataChanged.emit(
-            model_index,
-            model_index,
-            [
-                Qt.ItemDataRole.DisplayRole,
-                Qt.ItemDataRole.DecorationRole
-            ]
-        )
+                                model_index,
+                                model_index,
+                                [
+                                    Qt.ItemDataRole.DisplayRole,
+                                    Qt.ItemDataRole.DecorationRole
+                                ]
+                            )
         self.changed_filter.emit(sig_item,index)
 
     def insert_analysis(self, sig: SignalObject, analysis_node, index: int):
@@ -375,10 +387,10 @@ class PipelineTreeModel(QAbstractItemModel):
                                     )
 
         self.beginInsertRows(parent_index, index, index)
-        analysis_item = TreeItem(analysis_node, sig_item)
+        analysis_item = TreeItem(analysis_node, parent = sig_item)
         sig_item.children.insert(index, analysis_item)
         self.endInsertRows()
-
+        self.new_analysis.emit(sig_item,index,parent_index)
 
     def remove_analysis(self, sig: SignalObject, index: int):
         """Supprime une analyse de l'arbre."""
@@ -392,6 +404,7 @@ class PipelineTreeModel(QAbstractItemModel):
         self.beginRemoveRows(parent, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
+        self.signal_index_map.pop(sig)
 
 
     def update_analysis(self, sig: SignalObject, index: int):
@@ -411,7 +424,8 @@ class PipelineTreeModel(QAbstractItemModel):
                                     0,
                                     self.index( sig_item.parent.row(),
                                                 0,
-                                                QModelIndex())
+                                                QModelIndex()
+                                                )
                                 )
 
         model_index = self.index(index, 0, parent_index)
@@ -431,33 +445,3 @@ class PipelineTreeModel(QAbstractItemModel):
             if found:
                 return found
         return None
-
-
-
-    '''
-    def update_filter(self, sig: SignalObject, index: int):
-        """
-        Notifie Qt qu'un filtre existant a changé (nom, paramètres, icône),
-        sans modifier la structure de l'arbre.
-        """
-        sig_item = self._find_item(self.root, sig)
-        if not sig_item:
-            return
-
-        # récupérer l'item FilterNode correspondant
-        try:
-            filter_item = sig_item.child(index)
-        except Exception:
-            return
-
-        # QModelIndex de l'item filtre (colonne 0 = nom / icône)
-        filter_index = self.createIndex(index, 0, filter_item)
-
-        # notifier Qt uniquement sur ce qui peut changer
-        self.dataChanged.emit(  filter_index, filter_index,
-                                    [
-                                        Qt.ItemDataRole.DisplayRole,
-                                        Qt.ItemDataRole.DecorationRole
-                                    ]
-                            )
-    '''

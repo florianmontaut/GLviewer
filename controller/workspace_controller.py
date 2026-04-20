@@ -36,7 +36,8 @@ class WorkspaceController(QtCore.QObject):
     def start_macro_recording(self):
         self._macro_buffer = []
 
-    #! proposer de RAZ le buffer si l'utilisateur essaye de lancer un nouvel enregistrement alors qu'un est déjà en cours
+    #TODO proposer de RAZ le buffer si l'utilisateur essaye de lancer un nouvel 
+    #TODO enregistrement alors qu'un est déjà en cours
     def stop_macro_recording(self):
         name, ok = QtWidgets.QInputDialog.getText(
                                                     None,

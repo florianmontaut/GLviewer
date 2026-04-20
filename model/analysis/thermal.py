@@ -16,8 +16,6 @@ def thermal_step(t, T_inf, tau, T0):
     return T_inf - (T_inf - T0) * np.exp(-t / tau)
 
 
-
-#! Repartir d'analysisNode!
 class ThermalModelAnalysis(AnalysisNode):
     """
     Analyse thermique RC (1er ordre) sur un signal temporel.
@@ -37,23 +35,22 @@ class ThermalModelAnalysis(AnalysisNode):
                         "key": "projection_duration",
                         "description": "Durée supplémentaire pour projeter"+
                                         "la courbe après la fin du signal"
+                        },
+        "Model left range limit": {
+                        "type": "float",
+                        "default": 0.0,
+                        "key": "t_start",
+                        "description": "Borne gauche de la plage des données d'entrée"+
+                                        "du modèle."
+                        },
+        "Model right range limit": {
+                        "type": "float",
+                        "default": 100.0,
+                        "key": "t_end",
+                        "description": "Borne gauche de la plage des données d'entrée"+
+                                        "du modèle."
                         }
     }
-
-    def __init__(self, label=None):
-
-        self.id = uuid.uuid4().hex[:8]
-        super().__init__()
-        self.t_start = None
-        self.t_end = None
-        self.results: custom_items.ThermalFitResult | None = None
-        self._x_fitted = None
-        self._y_fitted = None
-        self._x_model = None
-        self._y_model = None
-        self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
-        print(f'AnalysisNode créée: {self.opts_dict}')
-
     # --------------------------------------------------
     # Configuration
     # --------------------------------------------------
@@ -67,7 +64,18 @@ class ThermalModelAnalysis(AnalysisNode):
         if params['projection_duration'] < 0:
             raise ValueError("Extrapolation time must be >= 0")
         #! ajouter une vérif sur la validité de la plage (start et stop).
-
+        
+        self.id = uuid.uuid4().hex[:8]
+        self.t_start = None
+        self.t_end = None
+        self.results: custom_items.ThermalFitResult | None = None
+        self._x_fitted = None
+        self._y_fitted = None
+        self._x_model = None
+        self._y_model = None
+        self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
+        print(f'AnalysisNode créée: {self.opts_dict}')
+        
     def set_fit_range(self, t_start: float, t_end: float):
         if t_end <= t_start:
             raise ValueError("t_end must be greater than t_start")
@@ -172,14 +180,14 @@ class ThermalModelAnalysis(AnalysisNode):
             return {}
 
         return {
-            "tau": self.results.tau,
-            "R_th": self.results.R_th,
-            "C_th": self.results.C_th,
-            "T0": self.results.T0,
-            "T_inf": self.results.T_inf,
-            "rmse": self.results.rmse,
-            "fit_range": (self.t_start, self.t_end),
-        }
+            "tau"       :    self.results.tau,
+            "R_th"      :    self.results.R_th,
+            "C_th"      :    self.results.C_th,
+            "T0"        :    self.results.T0,
+            "T_inf"     :    self.results.T_inf,
+            "rmse"      :    self.results.rmse,
+            "fit_range" :    (self.t_start, self.t_end),
+            }
 
 
 
@@ -229,76 +237,3 @@ class ThermalModelAnalysis(AnalysisNode):
 
         return model_signal
 
-
-class ThermalAnalysis(AnalysisNode):
-    """Analyse thermique : ajuste un modèle RC et extrapole à l'asymptotique."""
-    # Réutilise un type existant ou ajoute un nouveau
-    action_type = custom_types.qSignalType.MODEL
-    PARAMETER_SCHEMA = {
-        "Model Type": {
-            "type": "list",
-            "default": "1st_order",
-            "values": ["1st_order", "2nd_order", "polynomial"],
-            "readonly": False,
-            "key": "model_type",
-        },
-        "Polynomial Degree": {
-            "type": "int",
-            "default": 2,
-            "limits": (1, 10),
-            "readonly": False,
-            "key": "poly_deg",
-        },
-        "Extrapolation Time (s)": {
-            "type": "float",
-            "default": 1000.0,  # Temps d'extrapolation au-delà des données
-            "limits": (0, None),
-            "suffix": "s",
-            "readonly": False,
-            "key": "extrap_time",
-        },
-    }
-
-    def validate(self, params):
-        if params['extrap_time'] < 0:
-            raise ValueError("Extrapolation time must be >= 0")
-
-    @property
-    def display_name(self) -> str:
-        return f"Thermal Model ({self.get_param('model_type')})"
-
-    def compute(self, parent_signal):
-        x = parent_signal.x
-        y = parent_signal.y  # Utilise les données après pipeline
-
-        # Ajustement du modèle (simplifié, utilise tes modèles existants)
-        if self.get_param('model_type') == 'polynomial':
-            params = np.polyfit(x, y, self.get_param('poly_deg'))
-            model_func = lambda t: np.polyval(params, t)
-        else:
-            # Exemple pour 1st_order (RC) - remplace par tes vraies fonctions
-            model_func = lambda t, tau, asymptote: asymptote * (1 - np.exp(-t / tau))
-            params, _ = curve_fit(model_func, x, y, p0=[100, y[-1]])
-
-        # Extrapolation : étend x au-delà des données originales
-        max_x = x[-1] + self.get_param('extrap_time')
-        # Densifie pour lissage
-        x_extrap = np.linspace(x[0], max_x, int((max_x - x[0]) / (x[1] - x[0])) * 2)
-        y_extrap = model_func(x_extrap, *params) if self.get_param('model_type') != (
-                                                'polynomial') else model_func(x_extrap)
-
-        # Crée un DerivedSignalObject avec les données extrapolées
-        derived_name = f"{parent_signal.name}_thermal_model"
-        pen = parent_signal.pen
-        #pen = pg.mkPen(color="blue", style=Qt.PenStyle.DashLine)
-        derived_signal = DerivedSignalObject(
-            parent_signal=parent_signal,
-            name=derived_name,
-            x=x_extrap,
-            y=y_extrap,
-            pen=pen,
-            metadata={  "params"    : params,
-                        "model_type": self.get_param('model_type')
-                    }
-        )
-        return derived_signal

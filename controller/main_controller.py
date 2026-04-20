@@ -134,13 +134,14 @@ class MainController(QtCore.QObject):
             if file_obj.address in [file.address for file in self.workspace.files]:
                 return
 
-        self.menu_ctrl.save_recent_file_address([file_obj.item_type,file_obj.address])
+        self.menu_ctrl.save_recent_file_address([file_obj.file_type,file_obj.address])
         self.workspace.add_file(file_obj)
 
         # Construire QAbstractItemModel
         if self.model is None:
             self.model = PipelineTreeModel(self.workspace)
             self.model.new_filter.connect(self._on_filter_added)
+            self.model.new_analysis.connect(self._on_analysis_added)
             self.model.changed_filter.connect(self._on_filter_changed)
         else:
             self.model.add_file_subtree(file_obj)
@@ -181,7 +182,7 @@ class MainController(QtCore.QObject):
         self._connect_workspace_signals()
 
         for file_obj in self.workspace.files:
-            self.menu_ctrl.save_recent_file_address([file_obj.item_type,file_obj.address])
+            self.menu_ctrl.save_recent_file_address([file_obj.file_type,file_obj.address])
             for sig in file_obj.signals:
                 self.graph_ctrl.add_signal_curve(sig)
                 for analysis in sig.analyses:
@@ -207,15 +208,83 @@ class MainController(QtCore.QObject):
         Connecte les signaux émis par le TreeController à des slots du MainController.
         """
 
-        self.tree_ctrl.item_selected.connect(lambda data : self._on_item_selected(*data))
+        self.tree_ctrl.item_selected.connect(self.on_item_selected)
         self.tree_ctrl.visibility_changed.connect(self._on_visibility_changed)
         self.tree_ctrl.menu_actions_triggered.connect(self._action_concentrator)
 
-    def _on_item_selected(self, file, sig , node_index=None, analysis_index=None ):
-        """
-        Un signal a été sélectionné dans l'arbre.
-        """
+    def _get_attached_item(self,signal):
+        
+        print(f'Signal {signal} / type {signal.item_type}')
 
+        item_index = self.model.signal_index_map[signal]
+        item = item_index.internalPointer()
+        return item
+
+
+    def on_item_selected(self, item: TreeItem|SignalObject|DerivedSignalObject,index = None):
+        
+        if not isinstance(item,TreeItem):
+            item = self._get_attached_item(item)
+        
+        obj=item.data
+        role = item.role
+        
+        if index is None:
+            index = self.model.signal_index_map[obj]
+        
+        match role:
+            case custom_items.itemType.FILE:
+                print('file')
+                self.param_ctrl.load_params(obj,None,None)
+
+            case custom_items.itemType.RAW:
+                
+                sel_model = self.view.treefile.selectionModel()
+                with QtCore.QSignalBlocker(sel_model):  # ✅ blocage fin et sûr
+                    sel_model.setCurrentIndex(  index,
+                                                QtCore.QItemSelectionModel.
+                                                SelectionFlag.ClearAndSelect
+                                                )
+                # Mise en évidence de la courbe correspondante
+                self.graph_ctrl.highlight(obj)
+                # Mise à jour du controleur du curseur (on l'attache à la courbe)
+                self.cursor_ctrl.set_signal(obj)
+                # Chargement des paramètres dans le parameterTree
+                self.param_ctrl.load_params(obj,None,None)
+                if self.model.cursor_x is None:
+                    #bug si mous_pos = valeur par défaut (voir graph_controller)
+                    self.model.updateCursorVal(float(self.graph_ctrl.mouse_pos.x()))
+                self.cursor_ctrl.update_x(self.model.cursor_x)
+                for file in self.workspace.files:
+                    for s in file.signals:
+                        s.is_selected = False
+                obj.is_selected = True
+                # notifier le modèle
+                #? pourquoi ne pas faire la notification directement dans le tree_controller ?
+                self.model.dataChanged.emit( index, index,[QtCore.Qt.ItemDataRole.FontRole])
+                self.view.treefile.viewport().update()
+
+            case custom_items.itemType.FILTER:
+                #? est-il utile de passer le parent pour charger le 
+                #? sachant que obj = node. L'avantage de la méthode actuelle
+                #? réside dans le fait que l'itemTree permet de facilement récupérer
+                #? l'ensemble des informations sur la structure de données
+                #? à voir s'il n'est pas préférable de changer la méthode 
+                #? _on_param_change du parameter_controller
+                parent :SignalObject = item.parent.data
+                index = parent.pipeline.index(obj)
+                self.param_ctrl.load_params(parent, index,None)
+
+            case custom_items.itemType.ANALYSE:
+                parent :SignalObject = item.parent.data
+                index = parent.analyses.index(obj)
+                self.param_ctrl.load_params(parent, None, index)
+
+            case custom_items.itemType.DERIVED:
+                parent :SignalObject = item.parent.data
+                index = parent.derived_signals.index(obj)
+                self.param_ctrl.load_params(parent, None, index)
+        '''
         if file is not None:
             #? dans ce cas, on veut éditer les paramètres d'un fichier spécifique
             self.param_ctrl.load_params(file,node_index,analysis_index)
@@ -255,7 +324,7 @@ class MainController(QtCore.QObject):
             self.param_ctrl.load_params(sig, node_index,analysis_index)
         else:
             print(f'analysis_index is: {analysis_index}')
-            self.param_ctrl.load_params(sig, node_index,analysis_index)
+            self.param_ctrl.load_params(sig, node_index,analysis_index)'''
 
     def _on_visibility_changed(self, signal, index=None):
         """
@@ -345,8 +414,7 @@ class MainController(QtCore.QObject):
         """
         Connecte les signaux émis par le GraphController à des slots du MainController.
         """
-        self.graph_ctrl.curve_selected.connect(lambda sig:
-                                                self._on_item_selected(None,sig,None,None))
+        self.graph_ctrl.curve_selected.connect(self.on_item_selected)
         self.graph_ctrl.cursor_moved_X.connect(self._on_cursor_moved)
         self.graph_ctrl.menu_actions_triggered.connect(self._action_concentrator)
 
@@ -424,21 +492,19 @@ class MainController(QtCore.QObject):
         else:
             self.param_ctrl.load_params(signal,None,analysis_index)
 
-    def _on_filter_added(self, sig_item, index):
+    def _on_filter_added(self, sig_item, index,parent_index):
         # retrouver l'index Qt du filtre
 
-        parent_index = self.model.index( sig_item.row(),
-                                        0,
-                                        self.model.index(   sig_item.parent.row(),
-                                                            0,
-                                                            QtCore.QModelIndex())
-                                        )
-
-        filter_item_index = self.model.index(index, 0, parent_index)
         self.tree_ctrl.expand_items(parent_index)
         self._on_visibility_changed(sig_item,index)
-        # ajout 09/04 afin de mettre à jour le parameter_tree avec les ctrl-z et y:
-        #self.param_ctrl.load_params(sig_item.data,index,None)
+
+    def _on_analysis_added(self,sig_item,index,parent_index):
+        
+        obj=sig_item.data
+        derived_sig=obj.derived_signals[index]
+        self.graph_ctrl.add_signal_curve(derived_sig)
+        self.tree_ctrl.expand_items(parent_index)
+        self.model.signal_index_map[derived_sig] = parent_index
 
     def _on_filter_changed(self, sig_item, index):
 

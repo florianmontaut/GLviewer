@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 
 from ressources.custom_types import qSignalType
+from ressources.custom_items import itemType
 from ressources.custom_struct_functions import (generate_opts_dict,extract_parameter_values,
                                                 apply_options_to_parameters)
 
@@ -13,6 +14,7 @@ class  FilterNode(ABC):
     """
 
     #  identité logique IMMUTABLE (utilisée pour JSON, undo, factory)
+    item_type = itemType.FILTER
     action_type : qSignalType
     PARAMETER_SCHEMA: dict = {}
 

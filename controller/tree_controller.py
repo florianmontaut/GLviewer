@@ -2,14 +2,15 @@
 # controller/tree_controller.py
 
 from PyQt6 import QtCore,QtGui,QtWidgets
-from model.base_objects import SignalObject
+from model.base_objects import SignalObject,DerivedSignalObject
 from model.filters.base_filter import FilterNode
 from model.analysis.base_analysis import AnalysisNode
 from PyQt6.QtWidgets import QTreeView
 
 from controller.tree_context_menu_controller import TreeContextMenu
+from model.tree_item import TreeItem
 from ressources.custom_menu import SelectionState
-from ressources import custom_types
+from ressources import custom_types,custom_items
 
 class TreeController(QtCore.QObject):
     """
@@ -19,7 +20,7 @@ class TreeController(QtCore.QObject):
     - visibilité (checkbox)
     """
     # (sig, filter_idx, analysis_idx)
-    item_selected = QtCore.pyqtSignal(object) #tuple(SignalObject,int,int)
+    item_selected = QtCore.pyqtSignal(TreeItem,QtCore.QModelIndex) #tuple(SignalObject,int,int)
     visibility_changed = QtCore.pyqtSignal(SignalObject)
     menu_actions_triggered  = QtCore.pyqtSignal(custom_types.ActionModifier,
                                                 custom_types.qSignalType,
@@ -56,17 +57,18 @@ class TreeController(QtCore.QObject):
         self.model.dataChanged.connect(self._on_checkbox_changed)
 
     # ----------------------------------------------------------
+    '''
     def _resolve_signal_node_index(self, item):
         """Retourne l'index métier d'un nœud Filter/Analysis pour le Signal associé."""
         obj = item.data
-        if isinstance(obj, FilterNode):
+        if item.role == custom_items.itemType.FILTER:
             sig = item.parent.data
             try:
                 return (None, sig, sig.pipeline.index(obj), None)
             except ValueError:
                 return (None, sig, None, None)
 
-        if isinstance(obj, AnalysisNode):
+        if item.role == custom_items.itemType.ANALYSE:
             sig = item.parent.data
             print(f"Signal associé à l'analyse : {sig.display_name} / nombre d'analyses : {len(sig.analyses)}")
             try:
@@ -75,11 +77,11 @@ class TreeController(QtCore.QObject):
                 print(f"Erreur lors de la recherche de l'analyse : {e}")
                 return (None, sig, None, None)
 
-        if isinstance(obj, SignalObject):
+        if item.role == custom_items.itemType.RAW:
             return (None, obj, None, None)
 
         return (obj, None, None, None)
-
+    '''
     def _on_selection_changed(self, selected=None, deselected=None):
         if selected is not None:
             if not selected.indexes():
@@ -91,9 +93,8 @@ class TreeController(QtCore.QObject):
             print(  f'Item sélectionné: {obj.display_name} / {type(obj)} /'+
                     f'{isinstance(obj, AnalysisNode)}')
 
-            result = self._resolve_signal_node_index(item)
-            self.item_selected.emit(result)
-
+            #result = self._resolve_signal_node_index(item)
+            self.item_selected.emit(item,index)
             self.checkStates(obj)
         else:
             self.checkStates()
@@ -102,7 +103,7 @@ class TreeController(QtCore.QObject):
         if selected is not None:
 
             #? faut-il vraiment interdire l'accès aux actions si un filtre est sélectionné
-            if isinstance(selected,SignalObject):
+            if isinstance(selected,SignalObject|DerivedSignalObject):
                 ref = [sig for sig in selected.file.signals if sig.is_reference]
                 if ref:
                     ref = ref[0]

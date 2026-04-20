@@ -71,8 +71,8 @@ class ParameterController(QObject):
 
         print(f'\n {self.sender()}')
 
-        #! ajouter la gestion des FileObject içi aussi pour pouvoir éditer les paramètres globaux du fichier
-        #! (ex: sampling_rate)
+        #! ajouter la gestion des FileObject içi aussi pour pouvoir éditer les paramètres 
+        #! globaux du fichier (ex: sampling_rate)
         if analysis_index is not None:
             #? dans ce cas, on veut éditer les paramètres d'une analyse spécifique
             node = sig.analyses[analysis_index]

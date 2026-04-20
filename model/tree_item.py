@@ -1,5 +1,6 @@
 
 # model/tree_item.py
+from ressources.custom_types import itemType
 
 class TreeItem:
     """
@@ -14,6 +15,10 @@ class TreeItem:
     def __init__(self, data, parent=None):
         self.data = data
         self.parent = parent
+        if isinstance(data,str):
+            self.role = itemType.ROOT
+        else:
+            self.role = data.item_type
         self.children = []
 
     def add_child(self, item):

@@ -30,7 +30,7 @@ class FileStruct():
 
     name         :   str= field(init=False)
     address      :   str
-    item_type    :   str
+    file_type    :   str
     sampling     :   float
     n_samples    :   int
     recordDate   :   str

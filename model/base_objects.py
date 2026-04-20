@@ -24,7 +24,7 @@ class FileObject:
     """
 
 
-
+    item_type = custom_items.itemType.FILE
     PARAMETER_SCHEMA= {
                         'File name'    :{
                                             'type':'str',
@@ -78,7 +78,7 @@ class FileObject:
         self.validTable     :   list[bool]
         self.data           :   pd.DataFrame
         self.name           :   str
-        self.item_type      :   str
+        self.file_type      :   str
         self.start_x        :   float
         self.stop_x         :   float
         self.offset         :   int
@@ -185,7 +185,7 @@ class FileObject:
 
     def to_dict(self):
 
-        arg_to_export= ['item_type','address','signals']
+        arg_to_export= ['file_type','address','signals']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['signals'] = [sig.to_dict() for sig in obj_params['signals']]
 
@@ -222,7 +222,7 @@ class SignalObject:
     Représente un signal, dont les données sont calculées dynamiquement
     grâce à un pipeline de filtres non destructif.
     """
-
+    item_type = custom_items.itemType.RAW
     PARAMETER_SCHEMA= {
                         'Curve name'    :{
                                             'type':'str',
@@ -380,7 +380,8 @@ class DerivedSignalObject(SignalObject):
     Signal dérivé (modèle, projection, calcul analytique).
     Contrairement à SignalObject, x et y sont stockés directement.
     """
-    PARAMETER_SCHEMA= {
+    item_type = custom_items.itemType.DERIVED
+    PARAMETER_SCHEMA = {
                         'Curve name'    :{
                                             'type':'str',
                                             'default':None,
@@ -606,7 +607,7 @@ class FileObject:
         self.validTable     :   list[bool]
         self.data           :   pd.DataFrame
         self.name           :   str
-        self.item_type      :   str
+        self.file_type      :   str
         self.truncation     :   tuple[float,float]
         self.offset         :   int = 0
 
@@ -722,7 +723,7 @@ class FileObject:
 
     def to_dict(self):
 
-        arg_to_export= ['item_type','address','signals']
+        arg_to_export= ['file_type','address','signals']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['signals'] = [sig.to_dict() for sig in obj_params['signals']]
 

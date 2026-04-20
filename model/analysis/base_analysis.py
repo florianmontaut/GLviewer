@@ -6,6 +6,8 @@ if TYPE_CHECKING:
     from model.base_objects import SignalObject, DerivedSignalObject
 
 from ressources.custom_types import qSignalType
+from ressources.custom_items import itemType
+
 from ressources.custom_struct_functions import (generate_opts_dict, extract_parameter_values,
                                                 apply_options_to_parameters)
 
@@ -17,7 +19,7 @@ class AnalysisNode(ABC):
     """
     Classe de base pour toutes les analyses (symétrique à FilterNode).
     """
-
+    item_type = itemType.ANALYSE
     action_type: qSignalType
     PARAMETER_SCHEMA: dict = {}
 

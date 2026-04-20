@@ -1,12 +1,13 @@
 from enum import Enum,auto
 
 class itemType(Enum):
-
-    FILE  = auto()
-    RAW   = auto()
-    MODIF = auto()
-    MODEL = auto()
-
+    
+    ROOT    = auto()
+    FILE    = auto()
+    RAW     = auto()
+    FILTER  = auto()
+    ANALYSE = auto()
+    DERIVED = auto()
 class qSignalType(Enum):
 
     LOAD        = auto()

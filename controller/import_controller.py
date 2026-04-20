@@ -207,7 +207,7 @@ class ImportController(QtCore.QObject):
             data=df.set_index('Time',append=True)
             file_caracs=custom_items.FileStruct(
                                                 address     = fname,
-                                                item_type   = custom_types.fileType.GL.name,
+                                                file_type   = custom_types.fileType.GL.name,
                                                 sampling    = sampling,
                                                 n_samples   = n_points,
                                                 recordDate  = start_time,
@@ -310,7 +310,7 @@ class ImportController(QtCore.QObject):
 
             file_caracs=custom_items.FileStruct(
                                                 address     = fname,
-                                                item_type   = custom_types.fileType.CSV.name,
+                                                file_type   = custom_types.fileType.CSV.name,
                                                 sampling    = sampling,
                                                 n_samples   = n_points,
                                                 recordDate  = start_time,
@@ -392,7 +392,7 @@ class ImportController(QtCore.QObject):
 
             file_caracs=custom_items.FileStruct(
                                                 address     = fname,
-                                                item_type   = custom_types.fileType.TXT.name,
+                                                file_type   = custom_types.fileType.TXT.name,
                                                 sampling    = sampling,
                                                 n_samples   = n_points,
                                                 recordDate  = start_time,
@@ -483,7 +483,7 @@ class ImportController(QtCore.QObject):
 
         ws = Workspace()
         for file_data in data["workspace"]["files"]:
-            file_type=custom_types.fileType[file_data['item_type']]
+            file_type=custom_types.fileType[file_data['file_type']]
             try:
                 import_request=self.load_dict[file_type]
                 file_caracs=import_request.loader(file_data['address'])
