@@ -63,7 +63,7 @@ class PipelineTreeModel(QAbstractItemModel):
         row = self.root.child_count()  # position d'insertion
 
         self.beginInsertRows(root_index, row, row)
-        file_item = TreeItem(file_obj, parent= self.root)
+        file_item = TreeItem(file_obj, parent = self.root)
         self.root.add_child(file_item)
 
         # Ajouter les signaux
@@ -80,7 +80,7 @@ class PipelineTreeModel(QAbstractItemModel):
     # ----------------- Build signal subtree -----------------
 
     def add_signal_subtree(self, sig: SignalObject, parent:TreeItem):
-        sig_item = TreeItem(sig, parent= parent)
+        sig_item = TreeItem(sig, parent = parent)
         parent.add_child(sig_item)
 
         # ✅ on mémorise l'index
@@ -133,6 +133,7 @@ class PipelineTreeModel(QAbstractItemModel):
 
     # ---------------------- Model API ----------------------
     def index(self, row, column, parent):
+        """Retourne l'index Qt pour une position donnée."""
         if not self.hasIndex(row, column, parent):
             return QModelIndex()
 
@@ -143,11 +144,13 @@ class PipelineTreeModel(QAbstractItemModel):
             return self.createIndex(row, column, child)
         return QModelIndex()
 
-    def parent(self, index):
-        if not index.isValid():
-            return QModelIndex()
+    def parent(self, index = None,item=None):
+        """Retourne l'index parent d'un index donné."""
 
-        item = index.internalPointer()
+        if item is None:
+            if not index.isValid():
+                return QModelIndex()
+            item = index.internalPointer()
         parent_item = item.parent
 
         if parent_item == self.root or parent_item is None:
@@ -209,7 +212,7 @@ class PipelineTreeModel(QAbstractItemModel):
                 else:
                     return "-"
 
-
+        #actualisation de la police pour les signaux sélectionnés (en gras)
         if role == Qt.ItemDataRole.FontRole:
             if  obj.is_selected:
                 font = QFont()
@@ -317,9 +320,10 @@ class PipelineTreeModel(QAbstractItemModel):
         if not sig_item:
             return
 
-        parent_index = self.index(  sig_item.row(),
+        '''parent_index = self.index(  sig_item.row(),
                                     0,
-                                    self.index(sig_item.parent.row(), 0, QModelIndex()))
+                                    self.index(sig_item.parent.row(), 0, QModelIndex()))'''
+        parent_index = self.parent( item = sig_item)
 
         self.beginInsertRows(parent_index, index, index)
         filter_item = TreeItem(filter_node, parent = sig_item)
@@ -333,8 +337,8 @@ class PipelineTreeModel(QAbstractItemModel):
         if not sig_item:
             return
 
-        parent = self.index(sig_item.row(), 0, self.parent(self.index(sig_item.row(), 0, QModelIndex())))
-        self.beginRemoveRows(parent, index, index)
+        parent_index = self.parent( item = sig_item)
+        self.beginRemoveRows(parent_index, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
         self.changed_filter.emit(sig_item,None)
@@ -356,12 +360,7 @@ class PipelineTreeModel(QAbstractItemModel):
         #  synchronisation explicite avec la source de vérité
         filter_item.data = sig.pipeline[index]
 
-        parent_index = self.index(
-            sig_item.row(),
-            0,
-            self.index(sig_item.parent.row(), 0, QModelIndex())
-        )
-
+        parent_index = self.parent(item = sig_item)
         model_index = self.index(index, 0, parent_index)
 
         self.dataChanged.emit(
@@ -381,10 +380,7 @@ class PipelineTreeModel(QAbstractItemModel):
             return
         #! attention à la colonne 0 commune aux filtres,analyses et derivedSignal
         #! il est probable que cela trompe la gestion des index!
-        parent_index = self.index(  sig_item.row(),
-                                    0,
-                                    self.index(sig_item.parent.row(),0,QModelIndex())
-                                    )
+        parent_index = self.parent(item = sig_item)
 
         self.beginInsertRows(parent_index, index, index)
         analysis_item = TreeItem(analysis_node, parent = sig_item)
@@ -398,13 +394,13 @@ class PipelineTreeModel(QAbstractItemModel):
         if not sig_item:
             return
 
-        parent = self.index(sig_item.row(),
-                            0,
-                            self.parent(self.index(sig_item.row(), 0, QModelIndex())))
-        self.beginRemoveRows(parent, index, index)
+        parent_index = self.parent(item = sig_item)
+        self.beginRemoveRows(parent_index, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
         self.signal_index_map.pop(sig)
+        #! il faut supprimer les derived signals associés à cette analyse
+        #! par exemple la courbe associée (grpah_controller.add_signal)
 
 
     def update_analysis(self, sig: SignalObject, index: int):
@@ -419,14 +415,7 @@ class PipelineTreeModel(QAbstractItemModel):
         analysis_item = sig_item.child(index)
         analysis_item.data = sig.analyses[index]
 
-        parent_index = self.index(
-                                    sig_item.row(),
-                                    0,
-                                    self.index( sig_item.parent.row(),
-                                                0,
-                                                QModelIndex()
-                                                )
-                                )
+        parent_index = self.parent(item = sig_item)
 
         model_index = self.index(index, 0, parent_index)
 

@@ -94,6 +94,8 @@ class GraphController(QtCore.QObject):
         return self._mouse_pos #x = float(mouse_point.x())
 
 
+    #! à revoir, en l'état si le fichier .JSON n'est pas conforme, ça peut planter le graph_ctrl
+    #! peut-être faire une validation plus poussée dans le menu_controller avant d'appeler updateOptions
     def updateOptions(self,opts=None):
         if opts is not None:
             self.opts.update(opts)

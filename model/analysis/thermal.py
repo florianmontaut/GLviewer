@@ -5,7 +5,7 @@ import pyqtgraph as pg
 from PyQt6.QtCore import Qt
 from scipy.optimize import curve_fit
 
-from ressources import custom_items, custom_struct_functions
+from ressources import custom_items
 from .base_analysis import AnalysisNode
 from ressources import custom_types
 from model.base_objects import DerivedSignalObject,SignalObject
@@ -13,6 +13,11 @@ from model.base_objects import DerivedSignalObject,SignalObject
 
 def thermal_step(t, T_inf, tau, T0):
     """Réponse thermique à échelon : T(t) = T_inf - (T_inf-T0)*exp(-t/tau)"""
+    #=> avantage : formule simple, peu de paramètres, interprétation physique directe
+    # (croissante comme décroissante selon T_inf vs T0)
+    #=> inconvénient : ne modélise pas les phénomènes plus complexes
+    # (ex: réponse à une entrée variable, non-linéarités, etc.)
+
     return T_inf - (T_inf - T0) * np.exp(-t / tau)
 
 
@@ -47,8 +52,22 @@ class ThermalModelAnalysis(AnalysisNode):
                         "type": "float",
                         "default": 100.0,
                         "key": "t_end",
-                        "description": "Borne gauche de la plage des données d'entrée"+
+                        "description": "Borne droite de la plage des données d'entrée"+
                                         "du modèle."
+                        },
+        "User estimated power input (W)": {
+                        "type": "float",
+                        "default": 100.0,
+                        "suffix": "W",
+                        "key": "power",
+                        "description": "Puissance introduite (W)"
+                        },
+        "User estimated heat capacity": {
+                        "type": "float",
+                        "default": 1.0,
+                        "suffix": "J/K",
+                        "key": "heat_capacity",
+                        "description": "Capacité thermique estimée (J/K)"
                         }
     }
     # --------------------------------------------------
@@ -64,7 +83,7 @@ class ThermalModelAnalysis(AnalysisNode):
         if params['projection_duration'] < 0:
             raise ValueError("Extrapolation time must be >= 0")
         #! ajouter une vérif sur la validité de la plage (start et stop).
-        
+
         self.id = uuid.uuid4().hex[:8]
         self.t_start = None
         self.t_end = None
@@ -73,9 +92,11 @@ class ThermalModelAnalysis(AnalysisNode):
         self._y_fitted = None
         self._x_model = None
         self._y_model = None
-        self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
+
+        #! pourquoi ne pas utilser setAttr pour assigner les paramètres directement à l'objet ?
+        #! (ex: self.model_type = params['model_type'])
         print(f'AnalysisNode créée: {self.opts_dict}')
-        
+
     def set_fit_range(self, t_start: float, t_end: float):
         if t_end <= t_start:
             raise ValueError("t_end must be greater than t_start")
@@ -203,7 +224,7 @@ class ThermalModelAnalysis(AnalysisNode):
             self.t_start = x[0]
         if self.t_end is None:
             self.t_end = x[-1]
-        self.results=self.run(x,y,100)
+        self.results=self.run(x,y,self.get_param('power'))
 
         if self.results is None:
             raise RuntimeError("Model not computed")

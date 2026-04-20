@@ -177,6 +177,5 @@ class TreeController(QtCore.QObject):
             if index is None:
                 file_index = self.model.index(row, 0, root_index)
                 self.tree.expand(file_index)
-            elif row == index.row():
-                file_index = self.model.index(row, 0, root_index)
-                self.tree.expand(file_index)
+            else:
+                self.tree.expand(self.model.parent(index))

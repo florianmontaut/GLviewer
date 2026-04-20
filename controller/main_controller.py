@@ -213,7 +213,7 @@ class MainController(QtCore.QObject):
         self.tree_ctrl.menu_actions_triggered.connect(self._action_concentrator)
 
     def _get_attached_item(self,signal):
-        
+
         print(f'Signal {signal} / type {signal.item_type}')
 
         item_index = self.model.signal_index_map[signal]
@@ -222,23 +222,32 @@ class MainController(QtCore.QObject):
 
 
     def on_item_selected(self, item: TreeItem|SignalObject|DerivedSignalObject,index = None):
-        
+
         if not isinstance(item,TreeItem):
             item = self._get_attached_item(item)
-        
+
         obj=item.data
         role = item.role
-        
+
         if index is None:
             index = self.model.signal_index_map[obj]
-        
+        for file in self.workspace.files:
+            file.is_selected = False
+            for s in file.signals:
+                s.is_selected = False
+                for filter in s.pipeline:
+                    filter.is_selected = False
+                for analysis in s.analyses:
+                    analysis.is_selected = False
+
+        obj.is_selected = True
         match role:
             case custom_items.itemType.FILE:
                 print('file')
                 self.param_ctrl.load_params(obj,None,None)
 
             case custom_items.itemType.RAW:
-                
+
                 sel_model = self.view.treefile.selectionModel()
                 with QtCore.QSignalBlocker(sel_model):  # ✅ blocage fin et sûr
                     sel_model.setCurrentIndex(  index,
@@ -255,21 +264,18 @@ class MainController(QtCore.QObject):
                     #bug si mous_pos = valeur par défaut (voir graph_controller)
                     self.model.updateCursorVal(float(self.graph_ctrl.mouse_pos.x()))
                 self.cursor_ctrl.update_x(self.model.cursor_x)
-                for file in self.workspace.files:
-                    for s in file.signals:
-                        s.is_selected = False
-                obj.is_selected = True
+
                 # notifier le modèle
                 #? pourquoi ne pas faire la notification directement dans le tree_controller ?
                 self.model.dataChanged.emit( index, index,[QtCore.Qt.ItemDataRole.FontRole])
                 self.view.treefile.viewport().update()
 
             case custom_items.itemType.FILTER:
-                #? est-il utile de passer le parent pour charger le 
+                #? est-il utile de passer le parent pour charger le
                 #? sachant que obj = node. L'avantage de la méthode actuelle
                 #? réside dans le fait que l'itemTree permet de facilement récupérer
                 #? l'ensemble des informations sur la structure de données
-                #? à voir s'il n'est pas préférable de changer la méthode 
+                #? à voir s'il n'est pas préférable de changer la méthode
                 #? _on_param_change du parameter_controller
                 parent :SignalObject = item.parent.data
                 index = parent.pipeline.index(obj)
@@ -499,7 +505,7 @@ class MainController(QtCore.QObject):
         self._on_visibility_changed(sig_item,index)
 
     def _on_analysis_added(self,sig_item,index,parent_index):
-        
+
         obj=sig_item.data
         derived_sig=obj.derived_signals[index]
         self.graph_ctrl.add_signal_curve(derived_sig)

@@ -35,9 +35,7 @@ class AddAnalysisCommand(ReplayableCommand):
             self.signal.analyses.pop(self.index)
             raise RuntimeError(f"Analysis computation failed: {e}")
 
-        # Notifier le modèle (TreeView) => le model se chargera d'ajouter un 
-        # item au dictionnaire signal_index_map permettant de relier le node 
-        # à l'index du treeItem correspondant
+        # Notifier le modèle (TreeView)
         self.model.insert_analysis(self.signal, self.analysis_node, self.index)
 
     def undo(self):
@@ -46,4 +44,4 @@ class AddAnalysisCommand(ReplayableCommand):
             self.signal.derived_signals.remove(self.derived_signal)
 
         self.model.remove_analysis(self.signal, self.index)
-        
+

@@ -39,5 +39,4 @@ class RemoveAnalysisCommand(ReplayableCommand):
     def undo(self):
         self.signal.analyses.insert(self.index, self.removed_analysis)
         self.signal.derived_signals.extend(self.removed_derived)
-
         self.model.insert_analysis(self.signal, self.removed_analysis, self.index)

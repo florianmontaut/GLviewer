@@ -23,6 +23,7 @@ class  FilterNode(ABC):
         # et surtout pas une nouvelle référence au même objet. Ici on ne
         # récupère que la valeur par défaut du schéma qui passée dans la
         # classe de l'objet !
+        self.is_selected = False
         self.opts_dict = generate_opts_dict(self.PARAMETER_SCHEMA)
         self._params = {
                             self.opts_dict[name]: spec["default"] for name,

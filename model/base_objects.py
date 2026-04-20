@@ -84,6 +84,7 @@ class FileObject:
         self.offset         :   int
 
         self.signals = []   # Liste de SignalObject
+        self.is_selected = False
         self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
         self.colormap = pg.colormap.getFromMatplotlib('tab20')
         self.colors = self.colormap.getLookupTable(0,1,self.n_colors)
@@ -395,7 +396,7 @@ class DerivedSignalObject(SignalObject):
                                             "key": "pen"
                                             }
                     }
-    
+
     def __init__(  self,
                     parent_signal: SignalObject,
                     name: str,

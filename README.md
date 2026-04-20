@@ -22,6 +22,16 @@ FNT 18/04
     ¤ base_analysis/base_object/filter : définition de l'attribut item type
     ¤ diff_external : nouveau analysisNode qui permettra de faire la différence entre deux signaux de file différentes
 
-=> TODO : il faut ajouter la gestion de la modification des paramètres du modèle et ajouter la vérication 
+
+#Rev03 / Intégration des ThermalModelAnalysis / :
+    ¤ MAJ mineure des packages afin de simplifier la création de index_parent (utilisation d'une méthode tree_model qui
+    existait déjà mais qui n'était utilisée qu'une seule fois)
+    ¤ Mise en gras possible de tout type d'item sélectionable (avant seul les signaux brutes, RAW, pouvaient l'être)
+    ¤ Tentative de développer l'item parent lorsque d'un node est créer => échec pour l'instant malgré la modification du
+    tree_controller
+    ¤ Ajout des paramètres  Puissance d'entrée, Capacité thermique estimée => à implémenter dans les calculs, il faudra
+    réfléchir à la bouble input homme vs machine pour la capacité thermique et résistance thermique
+
+=> TODO : il faut ajouter la gestion de la modification des paramètres du modèle et ajouter la vérication
             de la validité du modèle (actuellment l'appli peut cracher si le modèle renvoit des valeurs trop
             importante)
