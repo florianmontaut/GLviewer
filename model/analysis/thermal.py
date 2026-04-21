@@ -41,19 +41,23 @@ class ThermalModelAnalysis(AnalysisNode):
                         "description": "Durée supplémentaire pour projeter"+
                                         "la courbe après la fin du signal"
                         },
-        "Model left range limit": {
-                        "type": "float",
-                        "default": 0.0,
-                        "key": "t_start",
-                        "description": "Borne gauche de la plage des données d'entrée"+
-                                        "du modèle."
-                        },
-        "Model right range limit": {
-                        "type": "float",
-                        "default": 100.0,
-                        "key": "t_end",
-                        "description": "Borne droite de la plage des données d'entrée"+
-                                        "du modèle."
+        'Model definition range':{
+                        "type": "cursors",
+                        "visible":False,
+                        "default": (0,1200),
+                        "expanded" : True,
+                        "cursors_setting":{
+                                'angle':90,
+                                'pos':[0,1200],
+                                'pen':pg.mkPen(color = 'r'),
+                                'label':'{value:0.0f}s',
+                                'labelOpts':{   
+                                                'color': (200,0,0),
+                                                'fill':(200,200,200,100),
+                                                'movable': True
+                                            }
+                                },
+                        "key": "model_range",
                         },
         "User estimated power input (W)": {
                         "type": "float",
@@ -95,7 +99,7 @@ class ThermalModelAnalysis(AnalysisNode):
 
         #! pourquoi ne pas utilser setAttr pour assigner les paramètres directement à l'objet ?
         #! (ex: self.model_type = params['model_type'])
-        print(f'AnalysisNode créée: {self.opts_dict}')
+        #print(f'AnalysisNode créée: {self.opts_dict}')
 
     def set_fit_range(self, t_start: float, t_end: float):
         if t_end <= t_start:
@@ -246,7 +250,7 @@ class ThermalModelAnalysis(AnalysisNode):
                                 "params": self.to_dict()
                             }
 
-        print(metadata)
+        #print(metadata)
         model_signal = DerivedSignalObject(
                                     parent_signal=parent_signal,
                                     name=name,
@@ -258,3 +262,17 @@ class ThermalModelAnalysis(AnalysisNode):
 
         return model_signal
 
+'''        "Model left range limit": {
+                        "type": "cursor",
+                        "default": 0.0,
+                        "key": "t_start",
+                        "description": "Borne gauche de la plage des données d'entrée"+
+                                        "du modèle."
+                        },
+        "Model right range limit": {
+                        "type": "float",
+                        "default": 100.0,
+                        "key": "t_end",
+                        "description": "Borne droite de la plage des données d'entrée"+
+                                        "du modèle."
+                        }'''

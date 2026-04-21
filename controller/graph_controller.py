@@ -4,9 +4,9 @@
 from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
-from model.base_objects import SignalObject,DerivedSignalObject
+from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
 from ressources.custom_menu import SelectionState
-from ressources import custom_graph_functions,custom_types
+from ressources import custom_graph_functions,custom_types,custom_items
 
 from controller.graph_context_menu_controller import GraphContextMenu
 from controller.graph_option_controller import GraphTreeController
@@ -38,7 +38,7 @@ class GraphController(QtCore.QObject):
     - update pipeline (sig.y recalcule automatiquement)
     """
 
-    curve_selected          = QtCore.pyqtSignal(SignalObject)
+    curve_selected          = QtCore.pyqtSignal(SelectionContext)
     reference_requested     = QtCore.pyqtSignal(SignalObject)
     cursor_moved_X          = QtCore.pyqtSignal(float)
     menu_actions_triggered  = QtCore.pyqtSignal(    custom_types.ActionModifier,
@@ -159,9 +159,38 @@ class GraphController(QtCore.QObject):
         if sig not in self.curves.keys():
             curve = pg.PlotDataItem(sig.x, sig.y, pen=sig.pen)
             curve.setCurveClickable(True)
-            curve.sigClicked.connect(lambda: self.curve_selected.emit(sig))
+            curve.sigClicked.connect(self._on_curve_clicked)
             self.plot.addItem(curve)
             self.curves[sig] = curve
+
+    def _signal_from_curve(self, curve):
+        for sig, c in self.curves.items():
+            if c is curve:
+                return sig
+        return None
+
+    def _on_curve_clicked(self,curve,event):
+        sig = self._signal_from_curve(curve)
+        #print(f'signal: {sig.display_name}')
+        if isinstance(sig, DerivedSignalObject):
+            ctx = SelectionContext(
+                                    role=custom_items.itemType.DERIVED,
+                                    signal=sig.parent_signal,
+                                    derived_index=sig.parent_signal.derived_signals.index(sig),
+                                    item=None,  # pas de TreeItem ici
+                                )
+
+        elif isinstance(sig, SignalObject):
+            ctx = SelectionContext(
+                                    role=custom_items.itemType.RAW,
+                                    signal=sig,
+                                    item=None,
+                                )
+        else:
+            #print(f'failed: {sig} / {type(sig)}')
+            return  # sécurité
+
+        self.curve_selected.emit(ctx)
 
     # ----------------------------------------------------
     def update_signal(self, sig):
@@ -173,39 +202,19 @@ class GraphController(QtCore.QObject):
         curve.setPen(sig.pen)
         curve.setVisible(sig.visible)
         self.update_vbox()
+    
+    def freeze_updates(self, freeze: bool):
+        self.graph.setUpdatesEnabled(not freeze)
+        self.vb.enableAutoRange(False)
+        if not freeze:
+            self.update_vbox()
+            self.vb.enableAutoRange(True)
+            self.vb.autoRange()
 
-        #print(len([key for key,value in self.curves.items()]), len(self.plot.listDataItems()))
-        #print("\n".join([f'{key.name}: {key.visible}/{value.isVisible()}' for key,value in self.curves.items()]))
+    def select_graph_from_context(self,ctx:SelectionContext):
 
-    # ----------------------------------------------------
-    '''def highlight(self, sig):
-        """Met en surbrillance le signal sélectionné."""
-
-        curve=self.curves[sig]
-        self._update_cursor_color(curve)
-        #!: régler le problème de synchro entre param et curve
-        #!: car en l'état le param afficher la largeur de piste et pas la valeur par défaut
-        if self.old_highlight != sig:
-            self.on_selection_changed(sig)
-            if curve is not None:
-                double_width=int(curve.opts['pen'].width()*2)
-                print('MAJ nouveau')
-                custom_graph_functions.updateCurve(curve,width = double_width,z_val = 10)
-            if self.old_highlight is not None:
-                old_curve=self.curves[self.old_highlight]
-                print('MAJ ancien')
-                if (self.old_highlight_width != int(old_curve.opts['pen'].width()/2)):
-                    print(f'MAJ de la largeur: {self.old_highlight_width} / '+
-                            f'{int(old_curve.opts["pen"].width()/2)} ')
-                    #custom_graph_functions.updateCurve(old_curve,self.old_highlight.pen.width())
-                    custom_graph_functions.updateCurve(old_curve)
-                else:
-                    print(f'pas de modif: {self.old_highlight_width}')
-                    custom_graph_functions.updateCurve(old_curve)
-                self.old_highlight_width = self.old_highlight.pen.width()
-        self.old_highlight = sig
-'''
-
+        self.highlight(ctx.signal)
+    
     def highlight(self, sig):
         """Met en surbrillance le signal sélectionné."""
 
@@ -238,8 +247,13 @@ class GraphController(QtCore.QObject):
 
     def remove_signal_curve(self, signal):
         curve = self.curves.pop(signal, None)
-        if curve:
+        if curve is not None:
+            
             self.plot.removeItem(curve)
+            curve.setParentItem(None)
+            curve.deleteLater()
+
+            #self.plot.removeItem(curve) #crash intempestif lors des undo/redo
 
 
     def _init_cursor(self):
@@ -339,6 +353,6 @@ class GraphController(QtCore.QObject):
                                         has_reference = False,
                                         is_recording= self.macro_recording
                                         )
-        print(f'graph states: {states}')
+        
         self.menu.update_enabled_states(states)
 

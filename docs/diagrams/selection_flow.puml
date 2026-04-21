@@ -1,0 +1,27 @@
+
+@startuml
+skinparam dpi 150
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam handwritten false
+
+actor User
+
+participant TreeView
+participant "TreeController" as TC
+participant "MainController" as MC
+participant "GraphController" as GC
+participant "ParameterController" as PC
+
+User -> TreeView : click TreeItem
+TreeView -> TC : selectionChanged(index)
+TC -> TC : _build_selection_context(item)
+TC -> MC : item_selected(ctx)
+
+MC -> MC : _clear_selection_flags()
+MC -> MC : mark ctx.signal.is_selected = True
+
+MC -> GC : highlight(ctx.signal)
+MC -> PC : load_params(ctx)
+
+@enduml

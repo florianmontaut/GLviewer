@@ -28,6 +28,7 @@ class AddFilterCommand(ReplayableCommand):
             self.index = len(self.signal.pipeline)-1 if len(self.signal.pipeline)>0 else 0
         self.signal.pipeline.insert(self.index, self.filter_node)
         self.signal.invalidate()
+        
         # notifier le modèle (TreeView)
         self.model.insert_filter(self.signal, self.filter_node, self.index)
 
@@ -35,5 +36,6 @@ class AddFilterCommand(ReplayableCommand):
     def undo(self):
         self.signal.pipeline.pop(self.index)
         self.signal.invalidate()
+        
         # notifier le modèle (TreeView)
         self.model.remove_filter(self.signal, self.index)

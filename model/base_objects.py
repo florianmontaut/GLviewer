@@ -7,11 +7,17 @@ import numpy as np
 import pandas as pd
 import json
 
+from dataclasses import dataclass,field
+from typing import Optional
+
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
 
 
-from ressources import custom_parameters,custom_struct_functions,custom_items
+from ressources import custom_parameters,custom_struct_functions
+from ressources.custom_items import itemType,FileStruct
+from model.tree_item import TreeItem
+
 
 
 
@@ -24,7 +30,7 @@ class FileObject:
     """
 
 
-    item_type = custom_items.itemType.FILE
+    item_type = itemType.FILE
     PARAMETER_SCHEMA= {
                         'File name'    :{
                                             'type':'str',
@@ -66,7 +72,7 @@ class FileObject:
 
     n_colors=20
 
-    def __init__(self, fileData : custom_items.FileStruct ):
+    def __init__(self, fileData : FileStruct ):
 
         for key,val in fileData.__dict__.items():
             setattr(self,key,val)
@@ -223,7 +229,7 @@ class SignalObject:
     Représente un signal, dont les données sont calculées dynamiquement
     grâce à un pipeline de filtres non destructif.
     """
-    item_type = custom_items.itemType.RAW
+    item_type = itemType.RAW
     PARAMETER_SCHEMA= {
                         'Curve name'    :{
                                             'type':'str',
@@ -381,7 +387,7 @@ class DerivedSignalObject(SignalObject):
     Signal dérivé (modèle, projection, calcul analytique).
     Contrairement à SignalObject, x et y sont stockés directement.
     """
-    item_type = custom_items.itemType.DERIVED
+    item_type = itemType.DERIVED
     PARAMETER_SCHEMA = {
                         'Curve name'    :{
                                             'type':'str',
@@ -496,7 +502,16 @@ class Workspace:
         return ws
 
 
-
+@dataclass(frozen=True)
+class SelectionContext:
+    role:               itemType
+    signal:             SignalObject
+    filter_index:       Optional[int] = None
+    analysis_index:     Optional[int] = None
+    derived_index:      Optional[int] = None
+    item:               Optional[TreeItem] = None
+    
+    
 PARAMETER_SCHEMA= {
                     'File name'    :{
                                         'type':'str',

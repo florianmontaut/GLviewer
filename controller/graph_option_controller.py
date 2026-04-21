@@ -19,36 +19,55 @@ class GraphTreeController(QtCore.QObject):
                         "Cursors menu": {
                                     "type": "group",
                                     "children":{
-
-                                                "Cursors type":{
-                                                                "type": "list",
-                                                                "values":[  "Waveform",
-                                                                            "Horizontal bars",
-                                                                            "Vertical bars",
-                                                                            "H&V bars"
-                                                                            ],
-                                                                "value":'Waveform',
-                                                                "key": "cursor_type",
-                                                                },
-                                                'Vertical cursors':{
-                                                                "type": "cursors",
-                                                                "visible":False,
-                                                                "expanded" : True,
-                                                                "key": "ver_cursors",
-                                                                },
-                                                'Horizontal cursors':{
-                                                                "type": "cursors",
-                                                                "visible":False,
-                                                                "expanded" : True,
-                                                                "key": "hor_cursors",
-                                                                },
-                                                "Mouse cursor":{
-                                                                "type": "mouse",
-                                                                "key": "mouse_cursor",
-                                                                "expanded" : True
-                                                                },
-                                                }
-                                        },
+                                        "Cursors type":{
+                                                    "type": "list",
+                                                    "values":[  "Waveform",
+                                                                "Horizontal bars",
+                                                                "Vertical bars",
+                                                                "H&V bars"
+                                                                ],
+                                                    "value":'Waveform',
+                                                    "key": "cursor_type",
+                                                    },
+                                        'Vertical cursors':{
+                                                    "type": "cursors",
+                                                    "visible":False,
+                                                    "expanded" : True,
+                                                    "cursors_setting": {
+                                                        'angle':90,
+                                                        'pos':[1200,3600],
+                                                        'pen':pg.mkPen(color = 'r'),
+                                                        'label':'{value:0.0f}s',
+                                                        'labelOpts':
+                                                            {'color': (200,0,0),
+                                                            'fill':(200,200,200,100),
+                                                            'movable': True}
+                                                        },
+                                                    "key": "ver_cursors",
+                                                    },
+                                        'Horizontal cursors':{
+                                                    "type": "cursors",
+                                                    "visible":False,
+                                                    "expanded" : True,
+                                                    "cursors_setting":  {
+                                                        'angle':0,
+                                                        'pos':[50,100],
+                                                        'pen':pg.mkPen(color = 'y'),
+                                                        'label':'T = {value:0.2f}°C',
+                                                        'labelOpts':
+                                                            {'color': (200,200,100),
+                                                            'fill': (200,200,200,50),
+                                                            'movable': True}
+                                                        },
+                                                    "key": "hor_cursors",
+                                                    },
+                                        "Mouse cursor":{
+                                                    "type": "mouse",
+                                                    "key": "mouse_cursor",
+                                                    "expanded" : True
+                                                    },
+                                        }
+                                    },
                         "Add text":{
                                     "type":"action",
                                     "key":"add_text"
@@ -151,30 +170,14 @@ class GraphTreeController(QtCore.QObject):
                     continue
 
             if ptype == "cursors":
-                if "Vertical" in pname.split(' '):
-                    cursors_opts = {
-                                        'angle':90,
-                                        'pos':[1200,3600],
-                                        'pen':pg.mkPen(color = 'r'),
-                                        'label':'{value:0.0f}s',
-                                        'labelOpts':{'color': (200,0,0),
-                                                    'fill':(200,200,200,100),
-                                                    'movable': True}
-                                    }
-                else:
-                    cursors_opts = {
-                                        'angle':0,
-                                        'pos':[50,100],
-                                        'pen':pg.mkPen(color = 'y'),
-                                        'label':'T = {value:0.2f}°C',
-                                        'labelOpts':{'color': (200,200,100),
-                                                    'fill': (200,200,200,50),
-                                                    'movable': True}
-                                    }
-                param=custom_parameters.LinkedCursors(name=pname,
-                                                graphWidget = self.graphPlot,
-                                                cursors_setting=cursors_opts)
+                
+                param=custom_parameters.LinkedCursors(  
+                                                    name=pname,
+                                                    graphWidget = self.graphPlot,
+                                                    cursors_setting = spec['cursors_setting']
+                                                    )
                 #param.setOpts(expanded=spec.get("expanded", True) )
+                
                 param.setOpts(**spec)
                 children.append(param)
                 continue

@@ -6,12 +6,14 @@ from PyQt6 import QtGui,QtCore
 
 from dataclasses import dataclass,field
 
+
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
 
 from .custom_parameters import ComplementaryElements
 from .custom_tree_functions import CustomTreeWidget
 from .custom_types import itemType,qSignalType,ActionModifier,fileType
+
 
 @dataclass
 class StandardStruct():
@@ -121,3 +123,6 @@ class ImportRequest:
     file_format: fileType
     loader_label : tuple
     loader: callable
+    
+
+

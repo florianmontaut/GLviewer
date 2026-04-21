@@ -1,0 +1,25 @@
+
+@startuml
+actor User
+
+participant "MainController" as MC
+participant "WorkspaceController" as WC
+participant "PipelineTreeModel" as Model
+participant "TreeController" as TC
+participant "GraphController" as GC
+participant "ParameterController" as PC
+
+User -> MC : Ctrl+Z
+MC -> WC : undo()
+
+WC -> Model : modify model state
+Model -> MC : model changed
+
+MC -> MC : choose fallback SelectionContext
+MC -> MC : select_from_context(ctx, source="external")
+
+MC -> TC : select Tree item
+MC -> GC : highlight(ctx.signal)
+MC -> PC : load_params(ctx)
+
+@enduml

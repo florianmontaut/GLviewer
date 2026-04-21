@@ -148,6 +148,8 @@ class PipelineTreeModel(QAbstractItemModel):
         """Retourne l'index parent d'un index donné."""
 
         if item is None:
+            if index is None :
+                return QModelIndex()
             if not index.isValid():
                 return QModelIndex()
             item = index.internalPointer()
@@ -316,28 +318,36 @@ class PipelineTreeModel(QAbstractItemModel):
     def insert_filter(self, sig: SignalObject,
                             filter_node: FilterNode,
                             index: int)-> QModelIndex | None:
-        sig_item = self._find_item(self.root, sig)
+        sig_item = self.find_item(self.root, sig)
         if not sig_item:
             return
 
         '''parent_index = self.index(  sig_item.row(),
                                     0,
                                     self.index(sig_item.parent.row(), 0, QModelIndex()))'''
-        parent_index = self.parent( item = sig_item)
-
-        self.beginInsertRows(parent_index, index, index)
+        root_index = self.parent( item = sig_item)
+        parent_index =  self.index(sig_item.row(),
+                                    0,
+                                    root_index)
+        
         filter_item = TreeItem(filter_node, parent = sig_item)
+        
+        self.beginInsertRows(parent_index, index, index)
         sig_item.children.insert(index, filter_item)
         self.endInsertRows()
 
         self.new_filter.emit(sig_item,index,parent_index)
 
     def remove_filter(self, sig: SignalObject, index: int):
-        sig_item = self._find_item(self.root, sig)
+        sig_item = self.find_item(self.root, sig)
         if not sig_item:
             return
 
-        parent_index = self.parent( item = sig_item)
+        root_index = self.parent( item = sig_item)
+        parent_index =  self.index(sig_item.row(),
+                                    0,
+                                    root_index)
+        
         self.beginRemoveRows(parent_index, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
@@ -348,7 +358,7 @@ class PipelineTreeModel(QAbstractItemModel):
         Mise à jour visuelle d'un FilterNode existant.
         Robuste aux remplacements IMMUTABLES.
         """
-        sig_item = self._find_item(self.root, sig)
+        sig_item = self.find_item(self.root, sig)
         if sig_item is None:
             return
 
@@ -360,7 +370,11 @@ class PipelineTreeModel(QAbstractItemModel):
         #  synchronisation explicite avec la source de vérité
         filter_item.data = sig.pipeline[index]
 
-        parent_index = self.parent(item = sig_item)
+
+        root_index = self.parent( item = sig_item)
+        parent_index =  self.index(sig_item.row(),
+                                    0,
+                                    root_index)
         model_index = self.index(index, 0, parent_index)
 
         self.dataChanged.emit(
@@ -375,62 +389,74 @@ class PipelineTreeModel(QAbstractItemModel):
 
     def insert_analysis(self, sig: SignalObject, analysis_node, index: int):
         """Insère une analyse dans l'arbre."""
-        sig_item = self._find_item(self.root, sig)
+        sig_item = self.find_item(self.root, sig)
         if not sig_item:
             return
-        #! attention à la colonne 0 commune aux filtres,analyses et derivedSignal
-        #! il est probable que cela trompe la gestion des index!
-        parent_index = self.parent(item = sig_item)
 
-        self.beginInsertRows(parent_index, index, index)
+        root_index   = self.parent( item = sig_item)
+        parent_index = self.index(  sig_item.row(),
+                                    0,
+                                    root_index)
         analysis_item = TreeItem(analysis_node, parent = sig_item)
+        
+        self.beginInsertRows(parent_index, index, index)
         sig_item.children.insert(index, analysis_item)
         self.endInsertRows()
+        
         self.new_analysis.emit(sig_item,index,parent_index)
 
     def remove_analysis(self, sig: SignalObject, index: int):
         """Supprime une analyse de l'arbre."""
-        sig_item = self._find_item(self.root, sig)
+        sig_item = self.find_item(self.root, sig)
         if not sig_item:
             return
 
-        parent_index = self.parent(item = sig_item)
+        root_index = self.parent( item = sig_item)
+        parent_index =  self.index(sig_item.row(),
+                                    0,
+                                    root_index)
+        
         self.beginRemoveRows(parent_index, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
-        self.signal_index_map.pop(sig)
+        
+        #self.signal_index_map.pop(sig) => fait planté l'appli
         #! il faut supprimer les derived signals associés à cette analyse
         #! par exemple la courbe associée (grpah_controller.add_signal)
 
 
     def update_analysis(self, sig: SignalObject, index: int):
         """Met à jour l'affichage d'une analyse après modification."""
-        sig_item = self._find_item(self.root, sig)
+        sig_item = self.find_item(self.root, sig)
         if sig_item is None:
             return
 
         if index < 0 or index >= sig_item.child_count():
             return
 
-        analysis_item = sig_item.child(index)
-        analysis_item.data = sig.analyses[index]
+        analysis_item       = sig_item.child(index)
+        analysis_item.data  = sig.analyses[index]
 
-        parent_index = self.parent(item = sig_item)
+        root_index = self.parent( item = sig_item)
+        parent_index =  self.index(sig_item.row(),
+                                    0,
+                                    root_index)
 
         model_index = self.index(index, 0, parent_index)
 
         self.dataChanged.emit(
-                            model_index,
-                            model_index,
-                            [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.DecorationRole]
+                                model_index,
+                                model_index,
+                                [Qt.ItemDataRole.DisplayRole,
+                                Qt.ItemDataRole.DecorationRole]
                             )
     # ---------------------- Search ----------------------
 
-    def _find_item(self, item: TreeItem, target_obj):
+    def find_item(self, item: TreeItem, target_obj):
         if item.data is target_obj:
             return item
         for child in item.children:
-            found = self._find_item(child, target_obj)
+            found = self.find_item(child, target_obj)
             if found:
                 return found
         return None

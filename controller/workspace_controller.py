@@ -3,25 +3,27 @@ from PyQt6 import QtCore,QtWidgets,QtGui
 from controller.commands.action_registery import ActionRegistry
 from controller.commands.macro import Macro,MacroCommand
 from ressources.custom_types import qSignalType, ActionModifier
-from ressources.custom_items import ActionRequest
+from ressources.custom_items import ActionRequest,itemType
 from ressources.custom_exceptions import MissingParameters
 from ressources.custom_dialogs import AnalysisParamsDialog
-from model.base_objects import SignalObject
+from model.base_objects import SignalObject,SelectionContext
 
 class WorkspaceController(QtCore.QObject):
 
-    pipeline_changed = QtCore.pyqtSignal(SignalObject)
-    analysis_changed = QtCore.pyqtSignal(SignalObject)
+    undo_redo_macro_activated = QtCore.pyqtSignal(SelectionContext)
     macro_created = QtCore.pyqtSignal(Macro)
 
-    def __init__(self, tree_model):
+    def __init__(self, tree_model,graph_ctrl):
         super().__init__()
 
-        self.undo_stack     = QtGui.QUndoStack()
-        self.model          = tree_model
-        self.registry       = ActionRegistry()
-        self.macros          = {}
-        self._macro_buffer  = None
+        self.undo_stack         = QtGui.QUndoStack()
+        #graph_ctrl est nécessaire afin de bloquer la MAJ du graphique lors 
+        #des opérations lourdes du type undo/redo
+        self.graph_controller   = graph_ctrl
+        self.model              = tree_model
+        self.registry           = ActionRegistry()
+        self.macros             = {}
+        self._macro_buffer      = None
 
     @property
     def is_recording(self):
@@ -107,20 +109,43 @@ class WorkspaceController(QtCore.QObject):
 
     def push(self,sig,action_request:ActionRequest):
 
-        print(f"Action request received: {action_request}")
         action_request.model = self.model
         try:
+            self.graph_controller.freeze_updates(True)
             cmd=self.registry.execute(sig,action_request)
             self.undo_stack.push(cmd)
+            
         except MissingParameters as e:
             self._ask_missing_params( sig,action_request,e.missing_params)
+        finally:
+            self.graph_controller.freeze_updates(False)
+
         if self._macro_buffer is not None:
             self._macro_buffer.append(action_request)
-
+        
         if action_request.action_type in (qSignalType.MODEL,qSignalType.FFT):
-            self.analysis_changed.emit(sig)
+            if action_request.index is None:
+                index = len(sig.analyses)
+            else:
+                index= action_request.index 
+            
+            ctx=SelectionContext(   
+                                    role = itemType.ANALYSE,
+                                    signal=sig,
+                                    analysis_index=index
+                                )
         else:
-            self.pipeline_changed.emit(sig)
+            if action_request.index is None:
+                index = len(sig.pipeline)
+            else:
+                index= action_request.index 
+            ctx=SelectionContext(   
+                                    role = itemType.FILTER,
+                                    signal=sig,
+                                    filter_index=action_request.index
+                                )
+        print(f'workspace PUSH: {ctx}')
+        self.undo_redo_macro_activated.emit(ctx)
 
     def apply_macro(self, macro: Macro|str, signal):
 

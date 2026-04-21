@@ -1,0 +1,24 @@
+
+@startuml
+actor User
+
+participant "PlotDataItem" as Curve
+participant "GraphController" as GC
+participant "MainController" as MC
+participant "TreeController" as TC
+participant "ParameterController" as PC
+
+User -> Curve : mouse click
+Curve -> GC : sigClicked(curve, event)
+
+GC -> GC : resolve SignalObject
+GC -> GC : build SelectionContext
+GC -> MC : curve_selected(ctx)
+
+MC -> MC : _clear_selection_flags()
+MC -> MC : mark ctx.signal.is_selected = True
+
+MC -> TC : select_from_context(ctx)
+MC -> PC : load_params(ctx)
+
+@enduml

@@ -32,6 +32,12 @@ FNT 18/04
     ¤ Ajout des paramètres  Puissance d'entrée, Capacité thermique estimée => à implémenter dans les calculs, il faudra
     réfléchir à la bouble input homme vs machine pour la capacité thermique et résistance thermique
 
-=> TODO : il faut ajouter la gestion de la modification des paramètres du modèle et ajouter la vérication
-            de la validité du modèle (actuellment l'appli peut cracher si le modèle renvoit des valeurs trop
-            importante)
+
+#Rev04 / Intégration des ThermalModelAnalysis / :
+    ¤ MAJ majeure des packages afin de simplifier la synchronisation de la selection via l'utilisation d'une dataclasse unique
+    SelectionContext
+    ¤ Correction et protection contre un bug provoquant le crash de l'application à cause de la mise à jour du graphique lors
+    du undo/redo. Maintenant le workspace hérite de graph_controller et peut stopper la MAJ du graph afin d'éviter toute erreur
+    du type QPaintDevice: Cannot destroy paint device that is being painted
+
+=> TODO : corriger les erreurs d'index None qui traine encore lors de la création d'un node

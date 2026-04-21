@@ -2,13 +2,14 @@
 # controller/tree_controller.py
 
 from PyQt6 import QtCore,QtGui,QtWidgets
-from model.base_objects import SignalObject,DerivedSignalObject
-from model.filters.base_filter import FilterNode
-from model.analysis.base_analysis import AnalysisNode
+from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
+                                
+from model.tree_item import TreeItem
+from model.tree_model import PipelineTreeModel
 from PyQt6.QtWidgets import QTreeView
 
 from controller.tree_context_menu_controller import TreeContextMenu
-from model.tree_item import TreeItem
+
 from ressources.custom_menu import SelectionState
 from ressources import custom_types,custom_items
 
@@ -20,7 +21,7 @@ class TreeController(QtCore.QObject):
     - visibilité (checkbox)
     """
     # (sig, filter_idx, analysis_idx)
-    item_selected = QtCore.pyqtSignal(TreeItem,QtCore.QModelIndex) #tuple(SignalObject,int,int)
+    item_selected = QtCore.pyqtSignal(SelectionContext) #tuple(SignalObject,int,int)
     visibility_changed = QtCore.pyqtSignal(SignalObject)
     menu_actions_triggered  = QtCore.pyqtSignal(custom_types.ActionModifier,
                                                 custom_types.qSignalType,
@@ -30,7 +31,7 @@ class TreeController(QtCore.QObject):
         super().__init__()
 
         self.tree = tree  # QTreeView
-        self.model = None
+        self.model : PipelineTreeModel = None
         self.macro_recording=False
         self.ref=None
         #self.tree.header().hide()
@@ -38,7 +39,7 @@ class TreeController(QtCore.QObject):
 
 
     # ----------------------------------------------------------
-    def set_model(self, model):
+    def set_model(self, model : PipelineTreeModel):
         self.model = model
         self.tree.setModel(model)
 
@@ -54,6 +55,7 @@ class TreeController(QtCore.QObject):
         self.expand_items()
         self.tree.viewport().update()
         selection_model.selectionChanged.connect(self._on_selection_changed)
+        #selection_model.currentChanged.connect(lambda: print("changed!"))
         self.model.dataChanged.connect(self._on_checkbox_changed)
 
     # ----------------------------------------------------------
@@ -82,7 +84,7 @@ class TreeController(QtCore.QObject):
 
         return (obj, None, None, None)
     '''
-    def _on_selection_changed(self, selected=None, deselected=None):
+    """def _on_selection_changed(self, selected=None, deselected=None):
         if selected is not None:
             if not selected.indexes():
                 return
@@ -97,7 +99,144 @@ class TreeController(QtCore.QObject):
             self.item_selected.emit(item,index)
             self.checkStates(obj)
         else:
-            self.checkStates()
+            self.checkStates()"""
+    
+    def _on_selection_changed(self, selected, deselected):
+        if selected is None:
+            return
+        if not selected.indexes():
+            return
+
+        index = selected.indexes()[0]
+        item: TreeItem = index.internalPointer()
+        
+        obj=item.data
+        obj.is_selected = True
+
+        ctx = self._build_selection_context(item)
+        if deselected is not None or not deselected:
+            indexes = deselected.indexes()
+            for index in indexes:
+                item: TreeItem = index.internalPointer()
+                obj = item.data
+                obj.is_selected = False
+        self.item_selected.emit(ctx)
+
+
+    def _build_selection_context(self, item: TreeItem) -> SelectionContext:
+        role = item.role
+        obj = item.data
+
+
+        if role == custom_items.itemType.FILE:
+            return SelectionContext(
+                role=role,
+                signal=obj,
+                item=item
+            )
+
+        if role == custom_items.itemType.RAW:
+            return SelectionContext(
+                role=role,
+                signal=obj,
+                item=item
+            )
+
+        if role == custom_items.itemType.FILTER:
+            sig = item.parent.data
+            return SelectionContext(
+                role=role,
+                signal=sig,
+                filter_index=sig.pipeline.index(obj),
+                item=item
+            )
+
+        if role == custom_items.itemType.ANALYSE:
+            sig = item.parent.data
+            return SelectionContext(
+                role=role,
+                signal=sig,
+                analysis_index=sig.analyses.index(obj),
+                item=item
+            )
+
+        if role == custom_items.itemType.DERIVED:
+            analysis_item = item.parent
+            sig_item = analysis_item.parent
+            sig = sig_item.data
+            return SelectionContext(
+                role=role,
+                signal=sig,
+                derived_index=sig.derived_signals.index(obj),
+                item=item
+            )
+
+        raise RuntimeError(f"Unhandled TreeItem role: {role}")
+
+
+    def find_treeItem(self,sig):
+        
+        return self.model.find_item(self.model.root,sig)
+
+    def select_tree_from_context(self, ctx: SelectionContext):
+        sel_model = self.tree.selectionModel()
+
+        index = None
+        print(f'Select_tree_from_context: {ctx}')
+
+        # ✅ RAW signal
+        if ctx.role == custom_items.itemType.RAW:
+            index = self.model.signal_index_map.get(ctx.signal)
+
+        # ✅ FILTER
+        elif ctx.role == custom_items.itemType.FILTER:
+            sig_item = self.find_treeItem(ctx.signal)
+            if sig_item:
+                index = self.model.index(ctx.filter_index, 0, sig_item.parent)
+
+        # ✅ ANALYSE
+        elif ctx.role == custom_items.itemType.ANALYSE:
+            sig_item = self.find_treeItem(ctx.signal)
+            if sig_item:
+                analysis_item = sig_item.child(ctx.analysis_index)
+                index = self.model.index(ctx.analysis_index, 0, sig_item.parent)
+
+        # ✅ DERIVED
+        elif ctx.role == custom_items.itemType.DERIVED:
+            sig_item = self.find_treeItem(ctx.signal)
+            if sig_item:
+                analysis_item = sig_item.child(ctx.analysis_index)
+                index = self.model.index(ctx.derived_index, 0, analysis_item.parent)
+
+        if index is None or not index.isValid():
+            return
+
+        # --- Expansion parents ---
+        parent = index
+        while parent.isValid():
+            self.tree.expand(parent)
+            parent = parent.parent()
+
+        # --- Sélection explicite ---
+        sel_model.select(
+                            index,
+                            QtCore.QItemSelectionModel.SelectionFlag.ClearAndSelect
+                            | QtCore.QItemSelectionModel.SelectionFlag.Rows
+                        )
+        sel_model.setCurrentIndex(
+                                    index,
+                                    QtCore.QItemSelectionModel.SelectionFlag.NoUpdate
+                                )
+
+        self.tree.scrollTo(
+                                    index,
+                                    QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter
+                                )
+
+
+
+
+
 
     def checkStates(self,selected=None):
         if selected is not None:
@@ -179,3 +318,25 @@ class TreeController(QtCore.QObject):
                 self.tree.expand(file_index)
             else:
                 self.tree.expand(self.model.parent(index))
+
+
+
+    def expand_and_select(self, index: QtCore.QModelIndex):
+        if not index or not index.isValid():
+            return
+
+        # développer tous les parents
+        parent = index
+        while parent.isValid():
+            self.tree.expand(parent)
+            parent = parent.parent()
+
+        # sélectionner l’item
+        sel = self.tree.selectionModel()
+        with QtCore.QSignalBlocker(sel):
+            sel.setCurrentIndex(
+                index,
+                QtCore.QItemSelectionModel.SelectionFlag.ClearAndSelect
+            )
+
+        self.tree.scrollTo(index, QtWidgets.QAbstractItemView.ScrollHint.EnsureVisible)

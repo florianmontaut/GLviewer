@@ -1,0 +1,7 @@
+controller/__pycache__/
+controller/commands/__pycache__/
+model/__pycache__/
+model/analysis/__pycache__/
+model/filters/__pycache__/
+ressources/__pycache__/
+view/__pycache__/

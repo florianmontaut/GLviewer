@@ -5,7 +5,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QHeaderView
 from pkg_resources import normalize_path
 from pyqtgraph.parametertree import Parameter, ParameterTree,parameterTypes
-from model.base_objects import SignalObject,FileObject
+from model.base_objects import SignalObject,FileObject,SelectionContext
 from model.filters.base_filter import FilterNode
 from model.analysis.base_analysis import AnalysisNode
 
@@ -21,24 +21,25 @@ class ParameterController(QObject):
 
     #? Signaux émis quand les paramètres sont modifiés:
     #   Signal/ index du filtre ou None/ index de l'analyse ou None/ nouveaux paramètres
-    _params_changed = pyqtSignal(object, object, object, dict)
+    params_changed = pyqtSignal(SelectionContext, dict)
 
-    def __init__(self, param_widget: ParameterTree):
+    def __init__(self, param_widget: ParameterTree, graph_widget):
         super().__init__()
         self.widget = param_widget
+        self.graph = graph_widget
         self.param = None
 
-    def _on_param_change(self, signal, filter_index, analysis_index):
+    def _on_param_change(self,ctx:SelectionContext):
         """
         Slot appelé lorsque l'utilisateur modifie un paramètre
         dans le ParameterTree.
         """
-        if filter_index is not None:
-            node :FilterNode = signal.pipeline[filter_index]
-        elif analysis_index is not None:
-            node :AnalysisNode = signal.analyses[analysis_index]
+        if ctx.filter_index is not None:
+            node :FilterNode = ctx.signal.pipeline[ctx.filter_index]
+        elif ctx.analysis_index is not None:
+            node :AnalysisNode = ctx.signal.analyses[ctx.analysis_index]
         else:
-            node :SignalObject = signal
+            node :SignalObject = ctx.signal
 
         # 1️⃣ Récupérer les nouvelles valeurs depuis le ParameterTree
         new_params = {}
@@ -58,28 +59,28 @@ class ParameterController(QObject):
             return
 
         # 3️⃣ Émettre un signal avec les nouveaux paramètres
-        self._params_changed.emit(
-                                    signal,
-                                    filter_index,
-                                    analysis_index,
-                                    new_params,
+        self.params_changed.emit(
+                                    ctx,
+                                    new_params
                                 )
 
-    def load_params(self,   sig: SignalObject|FileObject,
-                            index: int|None = None,
-                            analysis_index: int | None = None):
 
-        print(f'\n {self.sender()}')
+    def load_params(self, ctx = SelectionContext):   
 
+        '''sig: SignalObject|FileObject,
+        index: int|None = None,
+        analysis_index: int | None = None'''
+        
+        sig = ctx.signal
         #! ajouter la gestion des FileObject içi aussi pour pouvoir éditer les paramètres 
         #! globaux du fichier (ex: sampling_rate)
-        if analysis_index is not None:
+        if ctx.analysis_index is not None:
             #? dans ce cas, on veut éditer les paramètres d'une analyse spécifique
-            node = sig.analyses[analysis_index]
+            node = ctx.signal.analyses[ctx.analysis_index]
             available_signals = []
-        elif index is not None:
+        elif ctx.filter_index is not None:
             #? dans ce cas, on veut éditer les paramètres d'un filtre spécifique
-            node = sig.pipeline[index]
+            node = sig.pipeline[ctx.filter_index]
             available_signals = [ s for s in sig.file.signals if s is not sig ]
         else:
             #? dans ce cas, on veut éditer les paramètres du signal lui même
@@ -88,9 +89,9 @@ class ParameterController(QObject):
 
         self.param = self.build_parameter_tree_for_object(node, available_signals)
         self.widget.setParameters(self.param, showTop=True)
-        print(f'signal: {sig.name} / index {index} / analysis index {analysis_index}')
+        #print(f'signal: {sig.name} / index {ctx.filter_index} / analysis index {ctx.analysis_index}')
         self.param.sigTreeStateChanged.connect(
-            lambda *_: self._on_param_change(sig, index, analysis_index))
+            lambda *_: self._on_param_change(ctx))
 
         self.widget.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
 
@@ -117,6 +118,7 @@ class ParameterController(QObject):
                                 available_signals,
                                 group_key=None
                                 ):
+        
         children = []
 
         for param_name, spec in schema.items():
@@ -141,7 +143,31 @@ class ParameterController(QObject):
                             )
                 children.append(group)
                 continue
+            
+            # ------------- paramètres custom complexes n'ayant pas de valeur propre------------
+            if ptype == "complementary":
+                param["expanded"] = True
 
+                param = ComplementaryElements(
+                                                name=param_name,
+                                                start=spec.get("start_x",0),
+                                                stop=spec.get("stop_x",1)
+                                            )
+                children.append(param)
+                continue
+            
+            if ptype == "cursors":
+                #! ne marche pas alors que le même paramètre est passé dans 
+                #! graph_option_controller
+                param = LinkedCursors(  name = param_name,
+                                        graphWidget = self.graph,
+                                        cursors_setting = spec["cursors_setting"]
+                                        )
+                param.setOpts(**spec)
+                children.append(param)
+                continue
+            # -------------
+            
             if group_key is None:
                 key = obj.opts_dict[param_name]
             else:
@@ -172,16 +198,7 @@ class ParameterController(QObject):
             # ---------- CUSTOM ELEMENTS ----------
             #! à améliorer : la gestion des éléments personnalisés (ex: complementary) est un peu bancale,
             #! il faudrait trouver une manière plus élégante de les intégrer dans le système de paramètres
-            if ptype == "complementary":
-                param["expanded"] = True
 
-                param = ComplementaryElements(
-                                            name=param_name,
-                                            start=spec.get("start_x",0),
-                                            stop=spec.get("stop_x",1)
-                                        )
-                children.append(param)
-                continue
             # ---------- PEN ----------
             if ptype == "pen":
                 param["expanded"] = True

@@ -361,7 +361,7 @@ class ImportController(QtCore.QObject):
                 for n in range(len(rawtxt[0])):
                     channels.append(f'channel{n}')
             data=[]
-            print(f'File delim: {settings["delim"]} / Unit delim: {settings["unitdelim"]}')
+            #print(f'File delim: {settings["delim"]} / Unit delim: {settings["unitdelim"]}')
             try:
                 for line in rawtxt[settings['start']:]:
                     values=[float(val.replace(settings['unitdelim'],'.')) 

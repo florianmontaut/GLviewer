@@ -1,0 +1,64 @@
+
+@startuml
+skinparam classAttributeIconSize 0
+
+package "controller" {
+    class MainController {
+        +select_from_context(ctx, source)
+        -_clear_selection_flags()
+        -_select_tree_from_context(ctx)
+        -_select_graph_from_context(ctx)
+        -_load_parameters_from_context(ctx)
+    }
+
+    class TreeController {
+        +item_selected(ctx)
+        -_build_selection_context(item)
+    }
+
+    class GraphController {
+        +curve_selected(ctx)
+        -_on_curve_clicked(curve, event)
+        -_emit_selection_context(sig)
+    }
+
+    class ParameterController {
+        +load_params(signal, filter?, analysis?, derived?)
+    }
+
+    class WorkspaceController {
+        +undo()
+        +redo()
+    }
+
+    class SelectionContext {
+        role : itemType
+        signal : SignalObject
+        filter_index : int?
+        analysis_index : int?
+        derived_index : int?
+    }
+}
+
+package "model" {
+    class SignalObject
+    class DerivedSignalObject
+    class FilterNode
+    class AnalysisNode
+}
+
+TreeController --> SelectionContext
+GraphController --> SelectionContext
+
+MainController --> SelectionContext
+MainController --> TreeController
+MainController --> GraphController
+MainController --> ParameterController
+MainController --> WorkspaceController
+
+SelectionContext --> SignalObject
+DerivedSignalObject --|> SignalObject
+AnalysisNode --> SignalObject
+FilterNode --> SignalObject
+
+@enduml
