@@ -6,7 +6,7 @@ from scipy.interpolate import interp1d
 from .base_analysis import AnalysisNode
 from ..base_objects import SignalObject,DerivedSignalObject
 
-class DiffSignalNode(AnalysisNode):
+class DiffSignalAnalysis(AnalysisNode):
     PARAMETER_SCHEMA = {
                         "Reference signal": {
                                     "type": "signal",

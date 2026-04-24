@@ -20,7 +20,6 @@ class GraphContextMenu(BaseContextMenu):
         ref_     = self._add_action(qSignalType.REF)
         filter_  = self._add_action(qSignalType.FILTER)
         delta_   = self._add_action(qSignalType.DIFF)
-        x_offset = self._add_action(qSignalType.OFFSET_X)
         y_offset = self._add_action(qSignalType.OFFSET)
         model_   = self._add_action(qSignalType.MODEL)
         text_    = self._add_action(qSignalType.TEXT)
@@ -34,7 +33,6 @@ class GraphContextMenu(BaseContextMenu):
                                         isolate,
                                         ref_, filter_,
                                         delta_,
-                                        x_offset,
                                         y_offset,
                                         model_,
                                         text_,

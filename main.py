@@ -13,7 +13,7 @@ class App(QApplication):
 
         super(App,self).__init__(sys_argv)
         qdarktheme.setup_theme("auto")
-        application_params=custom_viewer_settings.params
+        application_params = custom_viewer_settings.params
 
         # Création de la fenêtre principale
         window = MainWindow()
@@ -28,11 +28,11 @@ class App(QApplication):
         dark=opts.get('dark_mode',False)
 
         if dark :
-            palette = qdarktheme.load_palette(theme="dark")
-            stylesheet = qdarktheme.load_stylesheet(theme="dark")
+            palette     = qdarktheme.load_palette(theme="dark")
+            stylesheet  = qdarktheme.load_stylesheet(theme="dark")
         else:
-            palette = qdarktheme.load_palette(theme="auto")
-            stylesheet = qdarktheme.load_stylesheet(theme="auto")
+            palette     = qdarktheme.load_palette(theme="auto")
+            stylesheet  = qdarktheme.load_stylesheet(theme="auto")
 
         self.setPalette(palette)
         self.setStyleSheet(stylesheet)

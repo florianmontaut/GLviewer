@@ -33,7 +33,7 @@ class TreeController(QtCore.QObject):
         self.tree = tree  # QTreeView
         self.model : PipelineTreeModel = None
         self.macro_recording=False
-        self.ref=None
+        self.reference_sig = None
         #self.tree.header().hide()
         self._init_tree_menu()
 
@@ -182,7 +182,6 @@ class TreeController(QtCore.QObject):
         sel_model = self.tree.selectionModel()
 
         index = None
-        print(f'Select_tree_from_context: {ctx}')
 
         # ✅ RAW signal
         if ctx.role == custom_items.itemType.RAW:
@@ -192,21 +191,22 @@ class TreeController(QtCore.QObject):
         elif ctx.role == custom_items.itemType.FILTER:
             sig_item = self.find_treeItem(ctx.signal)
             if sig_item:
-                index = self.model.index(ctx.filter_index, 0, sig_item.parent)
+                index = self.model.index(ctx.filter_index, 0, self.model.parent(item=sig_item))
 
         # ✅ ANALYSE
         elif ctx.role == custom_items.itemType.ANALYSE:
             sig_item = self.find_treeItem(ctx.signal)
             if sig_item:
                 analysis_item = sig_item.child(ctx.analysis_index)
-                index = self.model.index(ctx.analysis_index, 0, sig_item.parent)
+                index = self.model.index(ctx.analysis_index, 0, self.model.parent(item=sig_item))
 
         # ✅ DERIVED
         elif ctx.role == custom_items.itemType.DERIVED:
             sig_item = self.find_treeItem(ctx.signal)
             if sig_item:
-                analysis_item = sig_item.child(ctx.analysis_index)
-                index = self.model.index(ctx.derived_index, 0, analysis_item.parent)
+                #! on récupère un analyseNode car derivedTreeItem n'existe pas pour l'instant!
+                analysis_item = sig_item.child(ctx.derived_index)
+                index = self.model.index(ctx.derived_index, 0, self.model.parent(item=sig_item))
 
         if index is None or not index.isValid():
             return
@@ -243,13 +243,8 @@ class TreeController(QtCore.QObject):
 
             #? faut-il vraiment interdire l'accès aux actions si un filtre est sélectionné
             if isinstance(selected,SignalObject|DerivedSignalObject):
-                ref = [sig for sig in selected.file.signals if sig.is_reference]
-                if ref:
-                    ref = ref[0]
-                else:
-                    ref = None
                 has_select=True
-                has_ref = ref is not None and not selected.is_reference
+                has_ref = self.reference_sig is not None and not selected.is_reference
             else:
                 has_select = False
                 has_ref= False
@@ -340,3 +335,8 @@ class TreeController(QtCore.QObject):
             )
 
         self.tree.scrollTo(index, QtWidgets.QAbstractItemView.ScrollHint.EnsureVisible)
+
+    def set_reference_signal(self, sig : SignalObject):
+        
+        self.reference_sig=sig
+

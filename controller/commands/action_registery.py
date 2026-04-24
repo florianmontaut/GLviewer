@@ -96,7 +96,8 @@ class ActionRegistry:
                         )
 
         for sig_type in (   qSignalType.MODEL,
-                            qSignalType.FFT
+                            qSignalType.FFT,
+                            qSignalType.DIFF_EXT
                         ):
 
             # ADD

@@ -40,6 +40,8 @@ class WorkspaceController(QtCore.QObject):
 
     #TODO proposer de RAZ le buffer si l'utilisateur essaye de lancer un nouvel 
     #TODO enregistrement alors qu'un est déjà en cours
+    #! la méthode macro existe déjà dans le package QUndoStack! =>on y trouve également un clearStack
+    #! un signal indexChanged
     def stop_macro_recording(self):
         name, ok = QtWidgets.QInputDialog.getText(
                                                     None,
@@ -123,9 +125,9 @@ class WorkspaceController(QtCore.QObject):
         if self._macro_buffer is not None:
             self._macro_buffer.append(action_request)
         
-        if action_request.action_type in (qSignalType.MODEL,qSignalType.FFT):
+        if action_request.action_type in (qSignalType.MODEL,qSignalType.FFT,qSignalType.DIFF_EXT):
             if action_request.index is None:
-                index = len(sig.analyses)
+                index = len(sig.analyses)-1
             else:
                 index= action_request.index 
             
@@ -136,13 +138,13 @@ class WorkspaceController(QtCore.QObject):
                                 )
         else:
             if action_request.index is None:
-                index = len(sig.pipeline)
+                index = len(sig.pipeline)-1
             else:
                 index= action_request.index 
             ctx=SelectionContext(   
                                     role = itemType.FILTER,
                                     signal=sig,
-                                    filter_index=action_request.index
+                                    filter_index=index
                                 )
         print(f'workspace PUSH: {ctx}')
         self.undo_redo_macro_activated.emit(ctx)
@@ -156,10 +158,14 @@ class WorkspaceController(QtCore.QObject):
                 raise AttributeError
         for action_request in macro.action_requests:
             print(f"Applying action: {action_request}")
-            #! la méthode modify utilise les listes pipelines et analyses du modèle pour faire les modifications demandées,
-            #! il faut donc s'assurer que les action_requests contiennent des références valides aux objets concernés,
-            #! ce qui n'est pas le cas actuellement car les commandes sont empilées/sérialisées et par conséquent les objest signal ne sont pas modifié dans la boucle for
-            #! or si on sort de la boucle for on casse le undo global de la macro, il faudrait donc trouver un moyen de faire pointer les action_requests vers les bons objets du modèle avant de les appliquer
+            #! la méthode modify utilise les listes pipelines et analyses du modèle pour 
+            #! faire les modifications demandées, il faut donc s'assurer que les action_requests
+            #! contiennent des références valides aux objets concernés, ce qui n'est pas le cas
+            #! actuellement car les commandes sont empilées/sérialisées et par conséquent les 
+            #! objest signal ne sont pas modifié dans la boucle for or si on sort de la boucle
+            #! for on casse le undo global de la macro, il faudrait donc trouver un moyen de 
+            #! faire pointer les action_requests vers les bons objets du modèle avant de
+            #! les appliquer
             cmd = self.registry.execute(signal, action_request)
             if cmd:
                 commands.append(cmd)
@@ -174,16 +180,16 @@ class WorkspaceController(QtCore.QObject):
 
         dialog = AnalysisParamsDialog(missing_params,action_request.action_type)
         def resume_creation(new_params):
-            merged = {
-                **action_request.params
-            }
+            merged =    {
+                            **action_request.params
+                        }
             merged.update(new_params)
             new_request = ActionRequest(
-                action_modifier=action_request.action_modifier,
-                action_type=action_request.action_type,
-                params=merged,
-                index=action_request.index
-            )
+                                        action_modifier=action_request.action_modifier,
+                                        action_type=action_request.action_type,
+                                        params=merged,
+                                        index=action_request.index
+                                    )
             self.push(signal, new_request)
 
         dialog.params_ready.connect(resume_creation)

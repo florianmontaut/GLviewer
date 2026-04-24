@@ -319,6 +319,7 @@ class PipelineTreeModel(QAbstractItemModel):
                             filter_node: FilterNode,
                             index: int)-> QModelIndex | None:
         sig_item = self.find_item(self.root, sig)
+        
         if not sig_item:
             return
 
@@ -420,9 +421,10 @@ class PipelineTreeModel(QAbstractItemModel):
         sig_item.children.pop(index)
         self.endRemoveRows()
         
-        #self.signal_index_map.pop(sig) => fait planté l'appli
+        self.changed_analysis.emit(sig,index) 
+        #? seul signal à renvoyer le signal au lieu du sig_item
         #! il faut supprimer les derived signals associés à cette analyse
-        #! par exemple la courbe associée (grpah_controller.add_signal)
+        #! par exemple la courbe associée (graph_controller.add_signal)
 
 
     def update_analysis(self, sig: SignalObject, index: int):
@@ -453,6 +455,7 @@ class PipelineTreeModel(QAbstractItemModel):
     # ---------------------- Search ----------------------
 
     def find_item(self, item: TreeItem, target_obj):
+
         if item.data is target_obj:
             return item
         for child in item.children:

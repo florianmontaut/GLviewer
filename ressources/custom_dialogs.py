@@ -816,6 +816,7 @@ class ImportWizardDialog(QDialog):
                 else:
                     item.setBackground(self.DEFAULT_BRUSH)
 
+#! non exploité
 class AnalysisParamsDialog(QDialog):
 
     params_ready = QtCore.pyqtSignal(dict)

@@ -1,7 +1,7 @@
 from model.base_objects import SignalObject,DerivedSignalObject
 from model.analysis.thermal import ThermalModelAnalysis 
 
-
+#! pas utilisé
 class ModelManager:
 
     def __init__(self, signal: SignalObject):
@@ -36,7 +36,7 @@ class ModelManager:
         return analysis.id
 
 
-
+#! pas utilisé
 class ModelManager:
 
     def compute_analysis(self, signal, analysis):

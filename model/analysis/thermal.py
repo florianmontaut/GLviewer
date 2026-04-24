@@ -186,7 +186,8 @@ class ThermalModelAnalysis(AnalysisNode):
         T_inf = self.results.T_inf
 
         t_end = self._x_fitted[-1]
-        projection = max(t_end * 3, t_end + 5 * tau)
+        #on utilisera une projection à 3 Tau (soit 95% de la valeur finale)
+        projection = max(t_end * 3, t_end + 3 * tau)
 
         t_model = np.linspace(0, projection, 500)
         y_model = thermal_step(t_model, T_inf, tau, T0)
@@ -204,15 +205,17 @@ class ThermalModelAnalysis(AnalysisNode):
         if self.results is None:
             return {}
 
-        return {
-            "tau"       :    self.results.tau,
-            "R_th"      :    self.results.R_th,
-            "C_th"      :    self.results.C_th,
-            "T0"        :    self.results.T0,
-            "T_inf"     :    self.results.T_inf,
-            "rmse"      :    self.results.rmse,
-            "fit_range" :    (self.t_start, self.t_end),
-            }
+        return {    
+                    "type":self.item_type.name,
+                    "params":{
+                        "tau"       :    self.results.tau,
+                        "R_th"      :    self.results.R_th,
+                        "C_th"      :    self.results.C_th,
+                        "T0"        :    self.results.T0,
+                        "T_inf"     :    self.results.T_inf,
+                        "rmse"      :    self.results.rmse,
+                        "fit_range" :    (self.t_start, self.t_end)}
+                    }
 
 
 

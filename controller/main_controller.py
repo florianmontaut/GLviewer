@@ -116,9 +116,7 @@ class MainController(QtCore.QObject):
 
         self.view.addAction(self.undo_action)
         self.view.addAction(self.redo_action)
-        #self.edit_menu = self.view.menuBar().addMenu("Edit")
-        #self.edit_menu.addAction(self.undo_action)
-        #self.edit_menu.addAction(self.redo_action)
+
 
     def add_file(self,file_obj:FileObject):
         """
@@ -142,6 +140,7 @@ class MainController(QtCore.QObject):
             self.model.new_filter.connect(self._on_filter_added)
             self.model.new_analysis.connect(self._on_analysis_added)
             self.model.changed_filter.connect(self._on_filter_changed)
+            self.model.changed_analysis.connect(self._on_analyis_changed)
         else:
             self.model.add_file_subtree(file_obj)
 
@@ -172,7 +171,9 @@ class MainController(QtCore.QObject):
         self.workspace=workspace
         self.model = PipelineTreeModel(self.workspace)
         self.model.new_filter.connect(self._on_filter_added)
+        self.model.new_analysis.connect(self._on_analysis_added)
         self.model.changed_filter.connect(self._on_filter_changed)
+        self.model.changed_analysis.connect(self._on_analyis_changed)
         self.tree_ctrl.set_model(self.model)
         self.workspace_ctrl = WorkspaceController(self.model,self.graph_ctrl)
 
@@ -198,8 +199,6 @@ class MainController(QtCore.QObject):
         """
         Connecte les signaux émis par le WorkspaceController à des slots du MainController.
         """
-        #self.workspace_ctrl.pipeline_changed.connect(self._on_visibility_changed)
-        #self.workspace_ctrl.analysis_changed.connect(self._on_visibility_changed)
         self.workspace_ctrl.undo_redo_macro_activated.connect(self.select_from_context)
         self.workspace_ctrl.macro_created.connect(self._on_macro_created)
 
@@ -213,10 +212,9 @@ class MainController(QtCore.QObject):
                                                 self.select_from_context(ctx, source="tree")
                                             )
 
-        #self.tree_ctrl.item_selected.connect(self.on_item_selected)
         self.tree_ctrl.visibility_changed.connect(self._on_visibility_changed)
         self.tree_ctrl.menu_actions_triggered.connect(self._action_concentrator)
-
+        
     def _get_attached_item(self,signal):
 
         item_index = self.model.signal_index_map[signal]
@@ -286,7 +284,6 @@ class MainController(QtCore.QObject):
         # --------------------------------------------------
         # 3. Synchronisation TreeView (si nécessaire)
         # --------------------------------------------------
-        print(f'source: {source}\n')
         if source != "tree":
             
             self.tree_ctrl.select_tree_from_context(ctx)
@@ -407,8 +404,6 @@ class MainController(QtCore.QObject):
                                                 lambda ctx: 
                                                 self.select_from_context(ctx, source="graph")
                                                 )
-
-        #self.graph_ctrl.curve_selected.connect(self.on_item_selected)
         self.graph_ctrl.cursor_moved_X.connect(self._on_cursor_moved)
         self.graph_ctrl.menu_actions_triggered.connect(self._action_concentrator)
 
@@ -554,6 +549,16 @@ class MainController(QtCore.QObject):
                             )
         self.on_item_selected(ctx)
 
+    def _on_analyis_changed(self,sig, index):
+        out = None
+        for signal in self.graph_ctrl.curves.keys():
+            
+            if signal.item_type == custom_items.itemType.DERIVED:
+                if signal.parent_signal == sig and signal not in sig.derived_signals:
+                    out = signal
+                    break
+        self.graph_ctrl.remove_signal_curve(out)
+
     # -------------------------------------------------------------------------
     # HELPERS
     # -------------------------------------------------------------------------
@@ -593,6 +598,8 @@ class MainController(QtCore.QObject):
 
         # 1) Mettre à jour le workspace
         self.workspace.set_reference_signal(sig)
+        self.graph_ctrl.set_reference_signal(sig)
+        self.tree_ctrl.set_reference_signal(sig)
 
         # 2) Notifier le modèle (icône + police rouge)
         # Mise à jour ciblée : tous les signaux peuvent être impactés
@@ -609,7 +616,7 @@ class MainController(QtCore.QObject):
                                                     QtCore.Qt.ItemDataRole.ForegroundRole
                                                 ]
                                                 )
-
+        
         # 3) (optionnel) Feedback utilisateur
         self.view.statusBar().showMessage(
                                             f"Signal de référence défini : {sig.name}",
@@ -660,11 +667,11 @@ class MainController(QtCore.QObject):
             case custom_types.qSignalType.MACRO:
                 self.workspace_ctrl.apply_macro(macro_name,signal)
             case _:
-                action_request=self._build_action_request(action_type,signal)
+                action_request=self._build_action_request(signal,action_type)
                 self.workspace_ctrl.push(signal,action_request)
 
 
-    def _build_action_request(self, action_type, signal):
+    def _build_action_request(self, signal,action_type):
         """
         Méthode générant les actionRequests nécessaire à la création des Nodes
         filter ou analysis qui puissent être annulées via le undo du workspace controller,
@@ -672,9 +679,9 @@ class MainController(QtCore.QObject):
         (ex: cutoff pour les filtres, signal de référence pour les diff, etc.)
 
         Args:
+            signal (SignalObject|DerivedSignalObject): signal concerné par l'action
             action_type (custom_types.qSignalType): type d'action à réaliser (ajout de filtre,
                                                     ajout d'analyse, etc.)
-            signal (SignalObject|DerivedSignalObject): signal concerné par l'action
 
         Returns:
             custom_items.ActionRequest: structure de données contenant toutes les informations
@@ -689,13 +696,29 @@ class MainController(QtCore.QObject):
                                 custom_types.qSignalType.DIFF,
                             ):
             params = self._ask_filter_params(action_type, signal)
-            return custom_items.ActionRequest(
-                                                action_modifier =
-                                                custom_types.ActionModifier.ADD_ACTION,
-                                                action_type = action_type,
-                                                params = params,
-                                                index = None
-                                            )
+            
+            if (self.workspace.reference_signal.file != signal.file and
+                action_type == custom_types.qSignalType.DIFF):
+                
+                # si les signaux comparés proviennent de file différentes
+                # ce n'est pas un simple filtre mais une analyse
+                action_type = custom_types.qSignalType.DIFF_EXT
+                
+                return custom_items.ActionRequest(
+                                                    action_modifier =
+                                                    custom_types.ActionModifier.ADD_ACTION,
+                                                    action_type = action_type,
+                                                    params = params,
+                                                    index = None
+                                                )
+            else:
+                return custom_items.ActionRequest(
+                                                    action_modifier =
+                                                    custom_types.ActionModifier.ADD_ACTION,
+                                                    action_type = action_type,
+                                                    params = params,
+                                                    index = None
+                                                )
         #ajout d'un filterNode ou un analaysisNode
         return custom_items.ActionRequest(  action_modifier =
                                             custom_types.ActionModifier.ADD_ACTION,

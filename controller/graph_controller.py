@@ -52,13 +52,14 @@ class GraphController(QtCore.QObject):
         self.time_axis = RelativeTimeAxis(orientation='bottom')
         self.curves = {}  # SignalObject → PlotDataItem
 
-        self.old_highlight = None
-        self.old_highlight_width = 1
-        self.macro_recording=False
-        self.vcursor = None
-        self.xp_axis=None
-        self.yp_axis=None
-        self._mouse_pos=0
+        self.old_highlight          = None
+        self.old_highlight_width    = 1
+        self.reference_sig          = None
+        self.macro_recording        = False
+        self.vcursor                = None
+        self.xp_axis                = None
+        self.yp_axis                = None
+        self._mouse_pos             = 0
 
         # options par défaut de l'objet, le premier init est réalisé
         # par le menu_controller
@@ -252,12 +253,9 @@ class GraphController(QtCore.QObject):
             self.plot.removeItem(curve)
             curve.setParentItem(None)
             curve.deleteLater()
-
             #self.plot.removeItem(curve) #crash intempestif lors des undo/redo
 
-
     def _init_cursor(self):
-
 
         self.graph_tree_ctrl=GraphTreeController(self.plot,self.graph_tree,**self.opts)
         self.proxy = pg.SignalProxy(self.plot.scene().sigMouseMoved,rateLimit = 50,
@@ -333,18 +331,13 @@ class GraphController(QtCore.QObject):
                                                 macro_name)
 
     def on_selection_changed(self,sig:SignalObject=None):
-
+        
         # actuellement seul un signal d'un même DataFrame peut servir de référence.
         if sig is not None:
-            ref = [sig_ref for sig_ref in sig.file.signals if sig_ref.is_reference]
-            if ref:
-                ref = ref[0]
-            else:
-                ref = None
             states = SelectionState(
                                         has_selection = True,
-                                        has_reference = ref is not None and
-                                                        not sig.is_reference,
+                                        has_reference = (self.reference_sig is not None and
+                                                        not sig.is_reference) ,
                                         is_recording= self.macro_recording
                                         )
         else:
@@ -356,3 +349,7 @@ class GraphController(QtCore.QObject):
         
         self.menu.update_enabled_states(states)
 
+
+    def set_reference_signal(self, sig : SignalObject):
+        
+        self.reference_sig = sig

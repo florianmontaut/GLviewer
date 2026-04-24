@@ -14,6 +14,7 @@ class qSignalType(Enum):
     FILTER      = auto()
     REF         = auto()
     DIFF        = auto()
+    DIFF_EXT    = auto()
     AVG         = auto()
     RMS         = auto()
     OFFSET      = auto()

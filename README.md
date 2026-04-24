@@ -40,4 +40,8 @@ FNT 18/04
     du undo/redo. Maintenant le workspace hérite de graph_controller et peut stopper la MAJ du graph afin d'éviter toute erreur
     du type QPaintDevice: Cannot destroy paint device that is being painted
 
-=> TODO : corriger les erreurs d'index None qui traine encore lors de la création d'un node
+#Rev05 / Révision de l'import de fichier .csv du graphtec / :
+    ¤ MAJ majeure de la méthode openGLCsvFiles afin de pouvoir charger tout les types de fichiers venant des graphtecs et ce 
+    peut importe la version du firmwire, software ou type de graphtec utilisé : testé avec des enregirstrement de 2015 à 2026
+    venant de GL820, 840.
+
