@@ -81,7 +81,7 @@ class FileObject:
         self.sampling       :   float
         self.n_samples      :   int
         self.recordDate     :   str
-        self.validTable     :   list[bool]
+        self.import_params  :   list[bool]
         self.data           :   pd.DataFrame
         self.name           :   str
         self.file_type      :   str
@@ -192,7 +192,7 @@ class FileObject:
 
     def to_dict(self):
 
-        arg_to_export= ['file_type','address','signals']
+        arg_to_export= ['file_type','import_params','address','signals']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['signals'] = [sig.to_dict() for sig in obj_params['signals']]
 
@@ -203,11 +203,15 @@ class FileObject:
             Résout toutes les références différées (ex: DiffFilter)
             après que tous les SignalObject ont été recréés.
             """
+            # les analyses diff_external font référence à des signaux qui n'appartiennent pas
+            # au même fileOBject, c'est donc à la fin du chargement de tout le workspace
+            # qu'on peut résoudre ces références
             signal_map = { sig.name: sig   for sig in self.signals }
             for sig in self.signals:
                 for filt in sig.pipeline:
                     if filt.action_type.name == "DIFF":
                         filt.resolve_reference(signal_map)
+
 
     def signals_from_dict(self,data, filter_factory,analyses_factory):
 
@@ -459,7 +463,7 @@ class DerivedSignalObject(SignalObject):
 
 
 class Workspace:
-    
+
     def __init__(self):
         self.files = []  # list[FileObject]
         self.reference_signal = None
@@ -491,7 +495,6 @@ class Workspace:
             export=self.to_dict()
             json.dump(export, f, indent=2)
 
-
     @staticmethod
     def load(path, filter_factory):
 
@@ -499,10 +502,22 @@ class Workspace:
             data = json.load(f)
 
         ws = Workspace()
+        file_names=[]
         for file_data in data["workspace"]["files"]:
 
             file_obj = FileObject.from_dict(file_data, filter_factory)
             ws.add_file(file_obj)
+            file_names.append(file_obj.name)
+
+        # Après avoir créé tous les FileObject et SignalObject,
+        # on peut résoudre les références différées (ex: diff_external)
+        for file_obj in ws.files:
+            for sig in file_obj.signals:
+                for analysis in sig.analyses:
+                    if analysis.action_type.name == "DIFF_EXT":
+                        ref_file =  [   file for file in ws.files if
+                                        file.name == analysis.params['reference_file']][0]
+                        analysis.resolve_reference({s.name: s for s in ref_file.signals})
 
         return ws
 

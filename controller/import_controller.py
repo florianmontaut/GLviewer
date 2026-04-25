@@ -34,7 +34,7 @@ class ImportController(QtCore.QObject):
                                                     file_format=custom_types.fileType.TXT,
                                                     loader_label=("Loading .txt files",
                                                                 "txt Files (*.txt)"),
-                                                    loader= self.ImportWizard
+                                                    loader= self.openTxt
                                                     ),
                             custom_types.fileType.CSV:
                             custom_items.ImportRequest(
@@ -58,6 +58,7 @@ class ImportController(QtCore.QObject):
                             'CH':'CH',
                             'data':'Data'
                             }
+        self.txt_import_settings={}
         default_time = datetime.datetime.now()
 
         self.opts={
@@ -95,7 +96,7 @@ class ImportController(QtCore.QObject):
 
         self.opts.update(opts)
 
-    def openGLCsvFiles(self,fname):
+    def openGLCsvFiles(self,fname,settings=None):
         """
         Méthode permettant de charger des fichiers .CSV de type GLviewer dans l'appli
         Arguments:
@@ -113,7 +114,7 @@ class ImportController(QtCore.QObject):
             file_caracs={}
             file_caracs.update(self.file_caracs)
             # listes des phrases clées par ordre d'apparition dans un fichier csv classique
-            
+
             # création du générateur n permettant de simplifier la boucle for de recherche
             key_gen=(attribut for attribut in file_caracs.values())
             #index des caractéristiques du fichier
@@ -134,7 +135,7 @@ class ImportController(QtCore.QObject):
                 except StopIteration as e:
                     if not any(id_caracs.values()):
                         raise custom_exceptions.GLStructureError(
-                                                "le fichier .csv n'est pas au format"+ 
+                                                "le fichier .csv n'est pas au format"+
                                                 " GL820/840. L'un des 5 paramètres"+
                                                 " qui suit n'a pas été trouvé:"+
                                                 " Sampling/Total data points/"+
@@ -145,9 +146,9 @@ class ImportController(QtCore.QObject):
             check_table=[]
             #channels sera une liste de channel_settings
             channels=[]
-            
+
             for key,val in file_caracs.items():
-                
+
                 if val=='Sampling':
                     file_caracs[key] = custom_functions.mysplit(rawtxt[id_caracs[key]][1])
                 elif val=='Total data points':
@@ -163,7 +164,7 @@ class ImportController(QtCore.QObject):
                                             if j.strip(' ') == 'Span'][0]
                     type_position = [(i,i+1) for i, j in enumerate(channels_settings_list)
                                             if j.strip(' ') == 'Input'][0]
-                    
+
                     for n in range(id_caracs[key]+1,id_caracs["data"]):
                         line=rawtxt[n]
                         #ajout d'un test sur la présence des caractères "CH" afin d'éliminer
@@ -192,14 +193,14 @@ class ImportController(QtCore.QObject):
                         filtre=[setting['name'] for setting in channels]
                         name=channel_setting['name']
                         a=filtre.pop(num)
-                        #si le nom est déjà présent dans la liste on ajoute CH num pour le 
+                        #si le nom est déjà présent dans la liste on ajoute CH num pour le
                         #différencier.
                         if name in filtre:
                             channels[num]['name']=f'CH{num} {name}'
                         channels_names.append(name)
 
                     #pour éviter la pluspart des problématiques du à l'introduction d'espaces
-                    #retour à la ligne on cherche chacun des éléments et leur index plutôt 
+                    #retour à la ligne on cherche chacun des éléments et leur index plutôt
                     #que d'imposer un index fixe (il existe de multiple template des extracts
                     # GLviewer, selon la version du firmware, software ou du GL en lui-même)
                     id_data_row=id_caracs['data']+1
@@ -210,7 +211,7 @@ class ImportController(QtCore.QObject):
                             data_columns=[i for i, j in enumerate(line)
                                                     if j.strip(' ').startswith("CH") == True]
                             first_column_id=data_columns[0]
-                            #attention aux slices! Exemple a=[0,1,5,6,9,7] print(a[1:3]) => [1,5,6] 
+                            #attention aux slices! Exemple a=[0,1,5,6,9,7] print(a[1:3]) => [1,5,6]
                             last_column_id=data_columns[-1]+1
                         try:
                             if int(line[0])==1 or int(line[0])==2:
@@ -237,7 +238,7 @@ class ImportController(QtCore.QObject):
                                         columns=channels_names)
 
                     for col in df:
-                        channels_span=[[setting['max'],setting['min']] for setting in channels 
+                        channels_span=[[setting['max'],setting['min']] for setting in channels
                                         if setting['name']==col][0]
                         #passage des datas de string à float
                         df[col]=pd.to_numeric(df[col],errors='coerce')
@@ -258,20 +259,22 @@ class ImportController(QtCore.QObject):
             #configuration de la colonne Time comme index du dataframe
             data=df.set_index('Time',append=True)
             file_struct=custom_items.FileStruct(
-                                            address     = fname,
-                                            file_type   = custom_types.fileType.GL.name,
-                                            sampling    = file_caracs['sampling'],
-                                            n_samples   = file_caracs['n_samples'],
-                                            recordDate  = file_caracs['recordDate'],
-                                            validTable  = check_table,
-                                            data        = data
+                                            address         = fname,
+                                            file_type       = custom_types.fileType.GL.name,
+                                            sampling        = file_caracs['sampling'],
+                                            n_samples       = file_caracs['n_samples'],
+                                            recordDate      = file_caracs['recordDate'],
+                                            import_params   = {'check_table': check_table},
+                                            data            = data
                                             )
             if self._from_project == custom_types.ImportMode.INTERACTIVE:
-                
+
                 self.send_file_to_workspace(file_struct)
             else:
                 return file_struct
 
+    def _get_import_settings(self,params):
+        self.txt_import_settings=params
 
     def ImportWizard(self,adress, delim=None, unitDelim=None):
 
@@ -280,16 +283,22 @@ class ImportController(QtCore.QObject):
         if unitDelim is None:
             unitDelim=self.opts["default_unit_separator"]
 
-        userInput = custom_dialogs.ImportWizardDialog(adress = adress,
-                                                delimitor = delim,
-                                                unitDelim = unitDelim)
-        try:
-            userInput.accepted.connect(lambda: self.openTxt(fname = adress,
-                                                            new_settings = userInput.getFormat()
-                                                            ))
-            userInput.show()
-        except Exception as e:
-            self.ImportErrorUserWarning(e)
+        userInput = custom_dialogs.ImportWizardDialog(
+            adress=adress,
+            delimitor=delim,
+            unitDelim=unitDelim
+        )
+        userInput.params_ready.connect(self._get_import_settings)
+
+        result = userInput.exec()
+        if result != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+
+        settings = self.txt_import_settings or userInput.collect_params()
+        self.txt_import_settings = settings
+
+        return self.openTxt(adress, settings)
+
 
     def ImportErrorUserWarning(self,errorStruct):
 
@@ -302,6 +311,7 @@ class ImportController(QtCore.QObject):
         userInput = custom_dialogs.ImportErrorDialog(error = errorStruct[0],
                                                 currentFormat = errorStruct[1],
                                                 importFormats = format_dict)
+
         userInput.accepted.connect(lambda: self.loaderSelect(
                                                     (userInput.getFormat(),
                                                     [errorStruct[2]])
@@ -309,7 +319,8 @@ class ImportController(QtCore.QObject):
         userInput.show()
 
 
-    def openCsvFiles(self,fname,mode_etuve=False):
+
+    def openCsvFiles(self,fname,mode_etuve=False,settings=None):
         """
         Méthode permettant de charger un fichier .csv exporter par l'automate du CHILLER
         Arguments:
@@ -328,7 +339,7 @@ class ImportController(QtCore.QObject):
             start_time  = self.opts["default_time"]
             channels    =[]
             check_table =[]
-            
+
             for val in rawtxt.pop(0):
                 if val:
                     channels.append(val)
@@ -356,25 +367,25 @@ class ImportController(QtCore.QObject):
                 check_table.append(self.isChannelValid(df[signal],
                                                             channels_span,
                                                             active=self.opts["remove_overrange"]))
-                
+
             df.insert(loc=0,column='Time',value=np.linspace(0,(n_points-1)*sampling,n_points))
             data=df.set_index('Time',append=True)
 
             file_caracs=custom_items.FileStruct(
-                                                address     = fname,
-                                                file_type   = custom_types.fileType.CSV.name,
-                                                sampling    = sampling,
-                                                n_samples   = n_points,
-                                                recordDate  = start_time,
-                                                validTable  = check_table,
-                                                data        = data
+                                                address         = fname,
+                                                file_type       = custom_types.fileType.CSV.name,
+                                                sampling        = sampling,
+                                                n_samples       = n_points,
+                                                recordDate      = start_time,
+                                                import_params   = {'check_table': check_table},
+                                                data            = data
                                             )
             if self._from_project == custom_types.ImportMode.INTERACTIVE:
                 self.send_file_to_workspace(file_caracs)
             else:
                 return file_caracs
 
-    def openTxt(self,fname,new_settings=None):
+    def openTxt(self,fname,settings=None):
         """
         Méthode permettant de charger un fichier .txt (exemple enregistrement des NTCs via matis)
         Arguments:
@@ -383,7 +394,7 @@ class ImportController(QtCore.QObject):
                 None   --
         """
         file_caracs=self.file_caracs
-        settings={
+        default_settings={
                     'delim'             :';,\t',
                     'unitdelim'         : '.',
                     'start'             : 0,
@@ -393,8 +404,8 @@ class ImportController(QtCore.QObject):
                 }
         with open(fname,encoding="utf-8-sig") as csvfile:
 
-            if new_settings is not None:
-                settings.update(new_settings)
+            if settings is None:
+                settings = default_settings
 
             dialect = csv.Sniffer().sniff(csvfile.read(4096), delimiters=settings['delim'])
             csvfile.seek(0)
@@ -416,7 +427,7 @@ class ImportController(QtCore.QObject):
             #print(f'File delim: {settings["delim"]} / Unit delim: {settings["unitdelim"]}')
             try:
                 for line in rawtxt[settings['start']:]:
-                    values=[float(val.replace(settings['unitdelim'],'.')) 
+                    values=[float(val.replace(settings['unitdelim'],'.'))
                             for n,val in enumerate(line) if n not in settings['columns']]
                     data.append(values)
             except Exception as e:
@@ -429,7 +440,7 @@ class ImportController(QtCore.QObject):
                 df[signal]=pd.to_numeric(df[signal],errors='coerce')
                 # TODO: channels span: faut-il vérifier la validité des données
                 # sur un fichier csv?
-                channels_span=1000
+                channels_span=(200,-20 )
                 check_table.append(self.isChannelValid( df[signal],
                                                         channels_span,
                                                         active=self.opts["remove_overrange"]))
@@ -443,13 +454,13 @@ class ImportController(QtCore.QObject):
             data=df.set_index(df.columns[0],append=True)
 
             file_caracs=custom_items.FileStruct(
-                                                address     = fname,
-                                                file_type   = custom_types.fileType.TXT.name,
-                                                sampling    = sampling,
-                                                n_samples   = n_points,
-                                                recordDate  = start_time,
-                                                validTable  = check_table,
-                                                data        = data,
+                                                address         = fname,
+                                                file_type       = custom_types.fileType.TXT.name,
+                                                sampling        = sampling,
+                                                n_samples       = n_points,
+                                                recordDate      = start_time,
+                                                import_params   = settings,
+                                                data            = data,
                                             )
             if self._from_project == custom_types.ImportMode.INTERACTIVE:
                 self.send_file_to_workspace(file_caracs)
@@ -536,20 +547,34 @@ class ImportController(QtCore.QObject):
         ws = Workspace()
         for file_data in data["workspace"]["files"]:
             file_type=custom_types.fileType[file_data['file_type']]
-            try:
-                import_request=self.load_dict[file_type]
-                file_caracs=import_request.loader(file_data['address'])
-            except custom_exceptions.TxtDelimiterError  as e:
-                QtWidgets.QMessageBox.warning(self,
-                                    "Séparateur des colonnes invalide",
-                                    str(e)+'\n Veuillez vérifier le type de séparaterur utilisé.')
-                self.ImportWizard(file_data['address'])
-            except custom_exceptions.TxtFormatError  as e:
-                QtWidgets.QMessageBox.warning(self,
-                                    "Format invalide",
-                                    str(e)+'\n Veuillez vérifier le format du fichier.')
-                self.ImportWizard(file_data['address'])
-                
+            while True:
+                try:
+                    import_request:custom_items.ImportRequest = self.load_dict[file_type]
+                    file_caracs=import_request.loader(  file_data['address'],
+                                                        file_data['import_params'])
+                    break
+                except custom_exceptions.TxtDelimiterError  as e:
+                    QtWidgets.QMessageBox.warning(self,
+                                        "Séparateur des colonnes invalide",
+                                        str(e)+
+                                        '\n Veuillez vérifier le type de séparaterur utilisé.')
+                    file_caracs = self.ImportWizard(file_data['address'])
+                    if file_caracs is None:
+                        raise custom_exceptions.TxtFormatError(
+                            f"Import cancelled for {file_data['address']}"
+                        )
+                    break
+                except custom_exceptions.TxtFormatError  as e:
+                    QtWidgets.QMessageBox.warning(self,
+                                        "Format invalide",
+                                        str(e)+'\n Veuillez vérifier le format du fichier.')
+                    file_caracs = self.ImportWizard(file_data['address'])
+                    if file_caracs is None:
+                        raise custom_exceptions.TxtFormatError(
+                            f"Import cancelled for {file_data['address']}"
+                        )
+                    break
+
             file_obj = FileObject(file_caracs)
             file_obj.signals_from_dict(file_data, FilterFactory(),AnalysisFactory())
             ws.add_file(file_obj)
@@ -576,7 +601,7 @@ class ImportController(QtCore.QObject):
             try:
                 import_request=self.load_dict[fileType]
                 import_request.loader(fname)
-                
+
             except custom_exceptions.TxtDelimiterError  as e:
                 QtWidgets.QMessageBox.warning(self,
                                     "Séparateur des colonnes invalide",
@@ -616,7 +641,7 @@ class ImportController(QtCore.QObject):
         import_request : custom_items.ImportRequest = self.load_dict[fileType]
         if adress is not None:
             fnames=[adress]
-            
+
         else:
             message,file_extension = import_request.loader_label
             self.view.statusbar.showMessage(message,3000)
@@ -635,4 +660,4 @@ class ImportController(QtCore.QObject):
                     self.view.statusbar.showMessage(f"Loading file: {fname}",3000)
                     import_request.loader(fname)
                 except Exception as e :
-                    print(e)
+                    self.ImportWizard(fname)

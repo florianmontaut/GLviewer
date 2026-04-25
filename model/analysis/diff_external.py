@@ -5,8 +5,11 @@ from scipy.interpolate import interp1d
 
 from .base_analysis import AnalysisNode
 from ..base_objects import SignalObject,DerivedSignalObject
-
+from ressources import custom_types
 class DiffSignalAnalysis(AnalysisNode):
+
+
+    action_type = custom_types.qSignalType.DIFF_EXT
     PARAMETER_SCHEMA = {
                         "Reference signal": {
                                     "type": "signal",
@@ -27,34 +30,38 @@ class DiffSignalAnalysis(AnalysisNode):
                                             'type':'list',
                                             'default': 'start',
                                             'values':['start','stop'],
-                                            'key':'time_alignement'
+                                            'key':'time_alignment'
                                         },
                         }
 
     def validate(self,params):
 
+        self._params['reference_file'] = None
+
         if isinstance(params['reference'], SignalObject):
-            pass
+            self._params['reference_file'] = params['reference'].file.name
         elif  isinstance(params['reference'], str):
             self._reference_name = params['reference']
         else:
             raise ValueError('A reference signal must be a selected or a signal name passed')
 
     def get_params(self):
+        super_params = super().get_params()
         if isinstance(self.get_param('reference'), SignalObject):
-            return {'reference': self.get_param('reference').name}
+            super_params.update({'reference': self.get_param('reference').name})
         else:
-            return {'reference': self.get_param('reference')}
-        
+            super_params.update({'reference': self.get_param('reference')})
+        return super_params
+
     @property
     def display_name(self) -> str:
         #voir méthode ci-dessus, ne pas remplacer par  get_param !!
         return f"Diff ({self.get_params()['reference']})"
-    
+
     def resolve_reference(self, signal_map: dict):
         if  ( not isinstance(  self.get_param('reference'), SignalObject)
                 and hasattr(self,'_reference_name')):
-            
+
             self.set_param('reference', signal_map.get(self._reference_name))
             if self.get_param('reference') is None:
                 raise ValueError(
@@ -65,6 +72,7 @@ class DiffSignalAnalysis(AnalysisNode):
     def compute(self, parent_signal: SignalObject) -> DerivedSignalObject:
 
         ref_signal = self.get_param("reference")
+        self._params['reference_file'] = ref_signal.file.name if ref_signal else None
         if ref_signal is None:
             raise RuntimeError("Reference signal not resolved")
 
@@ -83,6 +91,7 @@ class DiffSignalAnalysis(AnalysisNode):
 
         name = f"{parent_signal.name} - {ref_signal.name}"
 
+        #! pas d'id contrairement à thermal
         return DerivedSignalObject(
             parent_signal=parent_signal,
             name=name,

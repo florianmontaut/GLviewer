@@ -30,14 +30,14 @@ class StandardStruct():
 @dataclass
 class FileStruct():
 
-    name         :   str= field(init=False)
-    address      :   str
-    file_type    :   str
-    sampling     :   float
-    n_samples    :   int
-    recordDate   :   str
-    validTable   :   list[bool]
-    data         :   DataFrame
+    name            :   str= field(init=False)
+    address         :   str
+    file_type       :   str
+    sampling        :   float
+    n_samples       :   int
+    recordDate      :   str
+    import_params   :   dict
+    data            :   DataFrame
 
     def __post_init__(self):
         self.name : str = self.address[self.address.rfind('/')+1:len(self.address)-4]
@@ -116,13 +116,13 @@ class ThermalFitResult:
     def to_dict(self):
 
         return  {k: v for k, v in self.__dict__.items() }
-    
+
 
 @dataclass(frozen=True)
 class ImportRequest:
     file_format: fileType
     loader_label : tuple
     loader: callable
-    
+
 
 

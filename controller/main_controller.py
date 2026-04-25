@@ -186,6 +186,12 @@ class MainController(QtCore.QObject):
             for sig in file_obj.signals:
                 self.graph_ctrl.add_signal_curve(sig)
                 for analysis in sig.analyses:
+                    #! le treeview ne semble pas être mis à jour et l'index de sélection des courbes
+                    #! semble être décalé
+                    if analysis.action_type.name == "DIFF_EXT":
+                        ref_file =  [   file for file in self.workspace.files if
+                                        file.name == analysis.get_param('reference_file')][0]
+                        analysis.resolve_reference({s.name: s for s in ref_file.signals})
                     derived = analysis.compute(sig)
                     sig.derived_signals.append(derived)
                     self.graph_ctrl.add_signal_curve(derived)
@@ -206,7 +212,7 @@ class MainController(QtCore.QObject):
         """
         Connecte les signaux émis par le TreeController à des slots du MainController.
         """
-        
+
         self.tree_ctrl.item_selected.connect(
                                                 lambda ctx:
                                                 self.select_from_context(ctx, source="tree")
@@ -214,7 +220,7 @@ class MainController(QtCore.QObject):
 
         self.tree_ctrl.visibility_changed.connect(self._on_visibility_changed)
         self.tree_ctrl.menu_actions_triggered.connect(self._action_concentrator)
-        
+
     def _get_attached_item(self,signal):
 
         item_index = self.model.signal_index_map[signal]
@@ -285,7 +291,7 @@ class MainController(QtCore.QObject):
         # 3. Synchronisation TreeView (si nécessaire)
         # --------------------------------------------------
         if source != "tree":
-            
+
             self.tree_ctrl.select_tree_from_context(ctx)
         # --------------------------------------------------
         # 4. Synchronisation Graph (si nécessaire)
@@ -305,7 +311,7 @@ class MainController(QtCore.QObject):
         match ctx.role:
             case custom_items.itemType.RAW:
                 self._select_signal(ctx)
-                
+
                 # Chargement des paramètres dans le parameterTree
                 self.param_ctrl.load_params(ctx)
             case _:
@@ -401,7 +407,7 @@ class MainController(QtCore.QObject):
         """
 
         self.graph_ctrl.curve_selected.connect(
-                                                lambda ctx: 
+                                                lambda ctx:
                                                 self.select_from_context(ctx, source="graph")
                                                 )
         self.graph_ctrl.cursor_moved_X.connect(self._on_cursor_moved)
@@ -446,7 +452,7 @@ class MainController(QtCore.QObject):
         Slot appelé lorsque l'utilisateur modifie un paramètre dans le ParameterController.
         """
         """Modification des paramètres d'une analyse."""
-        
+
         #TODO: utiliser pleinement le SelectionContext, actuellement le role de l'action
         #TODO: n'est pas utilisé
         if ctx.filter_index is None and ctx.analysis_index is None:
@@ -458,7 +464,7 @@ class MainController(QtCore.QObject):
                 for sig in ctx.signal.signals:
                     self.graph_ctrl.update_signal(sig)
             return
-        
+
         elif ctx.role == custom_items.itemType.FILTER:
             action_type=ctx.signal.pipeline[ctx.filter_index].action_type
             index=ctx.filter_index
@@ -489,8 +495,8 @@ class MainController(QtCore.QObject):
                                 item=None
                             )'''
         self.on_item_selected(ctx)
-        
-    
+
+
     def _on_filter_added(self, sig_item, index, parent_index):
         # retrouver l'index Qt du filtre
 
@@ -507,17 +513,17 @@ class MainController(QtCore.QObject):
         self.on_item_selected(ctx)
 
     def _on_analysis_added(self,sig_item,index,parent_index):
-        
+
 
         obj=sig_item.data
         derived_sig=obj.derived_signals[index]
-        
+
         # graphe
         self.graph_ctrl.add_signal_curve(derived_sig)
-        
+
         # ✅ récupérer l’index Qt réel
         analysis_index = self.model.index(index, 0, parent_index)
-        
+
         # ✅ déléguer sélection au TreeController
         self.tree_ctrl.expand_and_select(analysis_index)
         ctx=SelectionContext(
@@ -552,7 +558,7 @@ class MainController(QtCore.QObject):
     def _on_analyis_changed(self,sig, index):
         out = None
         for signal in self.graph_ctrl.curves.keys():
-            
+
             if signal.item_type == custom_items.itemType.DERIVED:
                 if signal.parent_signal == sig and signal not in sig.derived_signals:
                     out = signal
@@ -616,7 +622,7 @@ class MainController(QtCore.QObject):
                                                     QtCore.Qt.ItemDataRole.ForegroundRole
                                                 ]
                                                 )
-        
+
         # 3) (optionnel) Feedback utilisateur
         self.view.statusBar().showMessage(
                                             f"Signal de référence défini : {sig.name}",
@@ -696,14 +702,14 @@ class MainController(QtCore.QObject):
                                 custom_types.qSignalType.DIFF,
                             ):
             params = self._ask_filter_params(action_type, signal)
-            
+
             if (self.workspace.reference_signal.file != signal.file and
                 action_type == custom_types.qSignalType.DIFF):
-                
+
                 # si les signaux comparés proviennent de file différentes
                 # ce n'est pas un simple filtre mais une analyse
                 action_type = custom_types.qSignalType.DIFF_EXT
-                
+
                 return custom_items.ActionRequest(
                                                     action_modifier =
                                                     custom_types.ActionModifier.ADD_ACTION,

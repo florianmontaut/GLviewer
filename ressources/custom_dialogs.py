@@ -47,7 +47,7 @@ class OptionsPannel(QDialog):
         self.buttonBox.accepted.connect(self.accept)
         self.buttonBox.rejected.connect(self.reject)
     # ------------------------------------------------
-    
+
     def _restore_saved_options(self):
         for setting, param_root in self.parameter_roots.items():
             custom_struct_functions.apply_options_to_parameters(
@@ -59,7 +59,7 @@ class OptionsPannel(QDialog):
     def _build_tabs(self):
 
         for setting_name, setting_schema in self.schema.items():
-            
+
             tab=QWidget()
             gridLayout = QGridLayout(tab)
             gridLayout.setContentsMargins(5, 5, 5, 5)
@@ -113,7 +113,7 @@ class OptionsPannel(QDialog):
             # Signal selector (ComboBox)
             # -----------------------------
             # ---------- GROUP ----------
-            
+
             if ptype == "group":
                     group = self.build_parameter_group(
                                                         name=pname,
@@ -196,7 +196,7 @@ class TextDialog(QDialog):
 
         return self.textEdit.toHtml(),self.textEdit.font(),self.textEdit.textColor()
 
-    
+
     def showEvent(self, event):
         super().showEvent(event)
         self.textEdit.setFocus()
@@ -372,7 +372,7 @@ class pgText(pg.TextItem):
             html,self.font,self.color=self.window.getText()
             self.setHtml(html)
         self.window.accepted.connect(updateText)
-        
+
     '''
     def addArrow(self):
         """
@@ -436,7 +436,7 @@ class pgText(pg.TextItem):
     # Mise à jour de la flèche
     # -----------------------------------------------------
 
-        
+
     def _roiCornersScene(self):
         """
         Retourne les 4 coins du ROI du texte en coordonnées scene
@@ -452,7 +452,7 @@ class pgText(pg.TextItem):
 
         return [self.mapToScene(p) for p in corners_local]
 
-    
+
     def _closestCornerToAnchor(self):
         anchor_pos = self.anchorHandle.scenePos()
         corners = self._roiCornersScene()
@@ -464,7 +464,7 @@ class pgText(pg.TextItem):
 
         return min(distances, key=lambda x: x[1])[0]
 
-    
+
 
     def update_arrow(self):
         if not self.lineItem or not self.arrow or not self.anchorHandle:
@@ -559,7 +559,7 @@ class ImportWizardDialog(QDialog):
     Classe héritant de QDialog, permettant de proposer à l'utilisateur de changer
     de choisir et visualiser l'import de fichier .csv/.txt
     """
-
+    params_ready = QtCore.pyqtSignal(dict)
     HIGHLIGHT_BRUSH = QtGui.QBrush(QtGui.QColor(220, 235, 255))  # bleu clair
     DEFAULT_BRUSH = QtGui.QBrush(QtCore.Qt.GlobalColor.white)
 
@@ -575,6 +575,7 @@ class ImportWizardDialog(QDialog):
         self.NameBox : QCheckBox
         self.TimeBox : QCheckBox
         self.importTable : QTableWidget
+        self.buttonBox : QDialogButtonBox
 
         self.DelimitorEdit.setPlaceholderText(delimitor)
         self.UnitEdit.setPlaceholderText(unitDelim)
@@ -603,10 +604,9 @@ class ImportWizardDialog(QDialog):
         self.setModal(True)
 
 
-
     def newImportConfig(self,init=False) -> None:
 
-        
+
         def _normalize_delimiter( text: str) -> str:
             text = text.strip()
             if text == r"\t":
@@ -638,7 +638,7 @@ class ImportWizardDialog(QDialog):
             self.UnitEdit.setPlaceholderText(newUnit)
 
         with open(self.rawfile,encoding="utf-8-sig") as f :
-            
+
             rawtxt = csv.reader(f, delimiter=self.delimitor)
             for n,line in enumerate(rawtxt):
                 if n>49:
@@ -652,7 +652,7 @@ class ImportWizardDialog(QDialog):
 
             self.populate_table(outTxt)
 
-    def getFormat(self) -> list:
+    def collect_params(self) -> list:
         """
         Méthode assurant la mise en forme des entrées de l'utilisateur
         Returns:
@@ -744,7 +744,7 @@ class ImportWizardDialog(QDialog):
             for j in range(self.n_cols):
                 item = QTableWidgetItem(str(txt[i][j]))
                 # sélection désactivée, on gère le highlight
-                item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled)  
+                item.setFlags(QtCore.Qt.ItemFlag.ItemIsEnabled)
                 item.setBackground(self.DEFAULT_BRUSH)
                 self.importTable.setItem(i + 1, j + 1, item)
 
@@ -816,6 +816,12 @@ class ImportWizardDialog(QDialog):
                 else:
                     item.setBackground(self.DEFAULT_BRUSH)
 
+    def accept(self):
+        params = self.collect_params()
+        self.params_ready.emit(params)
+        print(f'params sent! :{params.items()}')
+        super().accept()
+
 #! non exploité
 class AnalysisParamsDialog(QDialog):
 
@@ -828,7 +834,7 @@ class AnalysisParamsDialog(QDialog):
 
     def accept(self):
         params = self.collect_params()
-        
+
         self.params_ready.emit(params)
         super().accept()
 
@@ -836,16 +842,16 @@ class AnalysisParamsDialog(QDialog):
         self.setWindowTitle("Missing parameters")
 
         layout = QFormLayout(self)
-        if action_type in filter_factory.FilterFactory.REGISTRY: 
+        if action_type in filter_factory.FilterFactory.REGISTRY:
             action = filter_factory.FilterFactory.REGISTRY[action_type]
         else:
             action = analysis_factory.AnalysisFactory.REGISTRY[action_type]
 
         schema = action.PARAMETER_SCHEMA
         self.opts_dicts = custom_struct_functions.generate_opts_dict(schema=schema)
-    
+
         for label, spec in schema.items():
-            
+
             key = spec["key"]
             if key not in missing_params:
                 continue  # on ne crée des champs QUE pour les paramètres manquants
@@ -898,7 +904,7 @@ class AnalysisParamsDialog(QDialog):
     def collect_params(self):
         params = {}
         for key, widget in self._widgets.items():
-            #key=self.opts_dicts[name] 
+            #key=self.opts_dicts[name]
             if isinstance(widget, QSpinBox):
                 params[key] = widget.value()
             elif isinstance(widget, QDoubleSpinBox):
