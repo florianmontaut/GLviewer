@@ -111,6 +111,8 @@ class WorkspaceController(QtCore.QObject):
 
     def push(self,sig,action_request:ActionRequest):
 
+        if action_request is None:
+            return
         action_request.model = self.model
         try:
             self.graph_controller.freeze_updates(True)

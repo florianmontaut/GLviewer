@@ -3,7 +3,7 @@
 
 from PyQt6 import QtCore,QtGui,QtWidgets
 from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
-                                
+
 from model.tree_item import TreeItem
 from model.tree_model import PipelineTreeModel
 from PyQt6.QtWidgets import QTreeView
@@ -100,7 +100,7 @@ class TreeController(QtCore.QObject):
             self.checkStates(obj)
         else:
             self.checkStates()"""
-    
+
     def _on_selection_changed(self, selected, deselected):
         if selected is None:
             return
@@ -109,7 +109,7 @@ class TreeController(QtCore.QObject):
 
         index = selected.indexes()[0]
         item: TreeItem = index.internalPointer()
-        
+
         obj=item.data
         obj.is_selected = True
 
@@ -120,6 +120,12 @@ class TreeController(QtCore.QObject):
                 item: TreeItem = index.internalPointer()
                 obj = item.data
                 obj.is_selected = False
+        try:
+            print(  "Tree_controller ligne 123: _on_selection_changed => méthode appelée en cliquant sur un treeItem: \n"+
+                    f'Signal: {ctx.signal.display_name}, role: {ctx.role}, filter index: {ctx.filter_index}'+
+                    f', Analysis index: {ctx.analysis_index}, derived index: {ctx.derived_index}\n')
+        except:
+            print('failed : échec d\'impression de données du CTX (Tree_controller)\n')
         self.item_selected.emit(ctx)
 
 
@@ -175,39 +181,40 @@ class TreeController(QtCore.QObject):
 
 
     def find_treeItem(self,sig):
-        
+
         return self.model.find_item(self.model.root,sig)
 
     def select_tree_from_context(self, ctx: SelectionContext):
         sel_model = self.tree.selectionModel()
-
+        sig_item = self.find_treeItem(ctx.signal)
+        if sig_item is None:
+            return
         index = None
-
+        root_index   = self.model.parent( item = sig_item)
+        parent_index = self.model.index(  sig_item.row(),
+                                        0,
+                                        root_index)
         # ✅ RAW signal
         if ctx.role == custom_items.itemType.RAW:
             index = self.model.signal_index_map.get(ctx.signal)
 
         # ✅ FILTER
         elif ctx.role == custom_items.itemType.FILTER:
-            sig_item = self.find_treeItem(ctx.signal)
-            if sig_item:
-                index = self.model.index(ctx.filter_index, 0, self.model.parent(item=sig_item))
+            index = self.model.index(ctx.filter_index, 0, parent_index)
 
         # ✅ ANALYSE
         elif ctx.role == custom_items.itemType.ANALYSE:
-            sig_item = self.find_treeItem(ctx.signal)
-            if sig_item:
-                analysis_item = sig_item.child(ctx.analysis_index)
-                index = self.model.index(ctx.analysis_index, 0, self.model.parent(item=sig_item))
+            analysis_item = sig_item.child(ctx.analysis_index)
+            index = self.model.index(ctx.analysis_index, 0, parent_index)
 
         # ✅ DERIVED
         elif ctx.role == custom_items.itemType.DERIVED:
-            sig_item = self.find_treeItem(ctx.signal)
-            if sig_item:
-                #! on récupère un analyseNode car derivedTreeItem n'existe pas pour l'instant!
-                analysis_item = sig_item.child(ctx.derived_index)
-                index = self.model.index(ctx.derived_index, 0, self.model.parent(item=sig_item))
+            #! on récupère un analyseNode car derivedTreeItem n'existe pas pour l'instant!
+            analysis_item = sig_item.child(ctx.derived_index)
+            index = self.model.index(ctx.derived_index, 0, parent_index)
 
+        print(  f'Ligne 217: {index.internalPointer().data.display_name}'+
+                f'{ctx.signal.display_name}')
         if index is None or not index.isValid():
             return
 
@@ -218,6 +225,7 @@ class TreeController(QtCore.QObject):
             parent = parent.parent()
 
         # --- Sélection explicite ---
+        sel_model.blockSignals(True)
         sel_model.select(
                             index,
                             QtCore.QItemSelectionModel.SelectionFlag.ClearAndSelect
@@ -232,6 +240,7 @@ class TreeController(QtCore.QObject):
                                     index,
                                     QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter
                                 )
+        sel_model.blockSignals(False)
 
 
 
@@ -337,6 +346,6 @@ class TreeController(QtCore.QObject):
         self.tree.scrollTo(index, QtWidgets.QAbstractItemView.ScrollHint.EnsureVisible)
 
     def set_reference_signal(self, sig : SignalObject):
-        
+
         self.reference_sig=sig
 

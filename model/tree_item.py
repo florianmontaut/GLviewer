@@ -1,7 +1,7 @@
 
 # model/tree_item.py
 from ressources.custom_types import itemType
-
+from PyQt6.QtCore import Qt, QModelIndex
 class TreeItem:
     """
     Représente un nœud dans l'arborescence du modèle Qt.
@@ -35,3 +35,12 @@ class TreeItem:
         if self.parent is None:
             return 0
         return self.parent.children.index(self)
+    '''
+    def column(self):
+        if self.parent is None:
+            return 0
+        return self.parent.children.index(self)
+
+    def index(self):
+
+        return QModelIndex(self.row(),self.column(),self.parent.index())'''

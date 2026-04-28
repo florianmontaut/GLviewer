@@ -100,7 +100,6 @@ class PipelineTreeModel(QAbstractItemModel):
                                         parent = sig_item,
                                     )
             sig_item.add_child(analysis_item)
-
             # Ajouter les signaux DÉRIVÉS de cette analyse
             for derived_sig in sig.derived_signals:
                 if (hasattr(derived_sig, 'metadata') and
@@ -116,6 +115,7 @@ class PipelineTreeModel(QAbstractItemModel):
         """
         # trouver l'index du FileObject
         root_item = self.root
+
         row = None
 
         for i, child in enumerate(root_item.children):
@@ -319,7 +319,7 @@ class PipelineTreeModel(QAbstractItemModel):
                             filter_node: FilterNode,
                             index: int)-> QModelIndex | None:
         sig_item = self.find_item(self.root, sig)
-        
+
         if not sig_item:
             return
 
@@ -330,9 +330,9 @@ class PipelineTreeModel(QAbstractItemModel):
         parent_index =  self.index(sig_item.row(),
                                     0,
                                     root_index)
-        
+
         filter_item = TreeItem(filter_node, parent = sig_item)
-        
+
         self.beginInsertRows(parent_index, index, index)
         sig_item.children.insert(index, filter_item)
         self.endInsertRows()
@@ -348,7 +348,7 @@ class PipelineTreeModel(QAbstractItemModel):
         parent_index =  self.index(sig_item.row(),
                                     0,
                                     root_index)
-        
+
         self.beginRemoveRows(parent_index, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
@@ -399,11 +399,11 @@ class PipelineTreeModel(QAbstractItemModel):
                                     0,
                                     root_index)
         analysis_item = TreeItem(analysis_node, parent = sig_item)
-        
+
         self.beginInsertRows(parent_index, index, index)
         sig_item.children.insert(index, analysis_item)
         self.endInsertRows()
-        
+
         self.new_analysis.emit(sig_item,index,parent_index)
 
     def remove_analysis(self, sig: SignalObject, index: int):
@@ -416,12 +416,12 @@ class PipelineTreeModel(QAbstractItemModel):
         parent_index =  self.index(sig_item.row(),
                                     0,
                                     root_index)
-        
+
         self.beginRemoveRows(parent_index, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
-        
-        self.changed_analysis.emit(sig,index) 
+
+        self.changed_analysis.emit(sig,index)
         #? seul signal à renvoyer le signal au lieu du sig_item
         #! il faut supprimer les derived signals associés à cette analyse
         #! par exemple la courbe associée (graph_controller.add_signal)

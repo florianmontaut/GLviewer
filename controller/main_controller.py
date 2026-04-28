@@ -291,7 +291,6 @@ class MainController(QtCore.QObject):
         # 3. Synchronisation TreeView (si nécessaire)
         # --------------------------------------------------
         if source != "tree":
-
             self.tree_ctrl.select_tree_from_context(ctx)
         # --------------------------------------------------
         # 4. Synchronisation Graph (si nécessaire)
@@ -301,6 +300,7 @@ class MainController(QtCore.QObject):
         # --------------------------------------------------
         # 5. Chargement ParameterTree
         # --------------------------------------------------
+        print(f'{source}')
         self.param_ctrl.load_params(ctx)
 
 
@@ -702,28 +702,27 @@ class MainController(QtCore.QObject):
                                 custom_types.qSignalType.DIFF,
                             ):
             params = self._ask_filter_params(action_type, signal)
-
-            if (self.workspace.reference_signal.file != signal.file and
-                action_type == custom_types.qSignalType.DIFF):
-
-                # si les signaux comparés proviennent de file différentes
-                # ce n'est pas un simple filtre mais une analyse
-                action_type = custom_types.qSignalType.DIFF_EXT
-
-                return custom_items.ActionRequest(
-                                                    action_modifier =
-                                                    custom_types.ActionModifier.ADD_ACTION,
-                                                    action_type = action_type,
-                                                    params = params,
-                                                    index = None
-                                                )
-            else:
-                return custom_items.ActionRequest(
-                                                    action_modifier =
-                                                    custom_types.ActionModifier.ADD_ACTION,
-                                                    action_type = action_type,
-                                                    params = params,
-                                                    index = None
+            if action_type == custom_types.qSignalType.DIFF:
+                # pas besoin de tester si une référence existe, les règles d'activation des actions
+                # sont là pour ça (voir menu_controller)
+                if (self.workspace.reference_signal.file != signal.file):
+                    # si les signaux comparés proviennent de file différentes
+                    # ce n'est pas un simple filtre mais une analyse
+                    action_type = custom_types.qSignalType.DIFF_EXT
+                    return custom_items.ActionRequest(
+                                                        action_modifier =
+                                                        custom_types.ActionModifier.ADD_ACTION,
+                                                        action_type = action_type,
+                                                        params = params,
+                                                        index = None
+                                                    )
+            #traitement de Filter et diff par le même return
+            return custom_items.ActionRequest(
+                                                action_modifier =
+                                                custom_types.ActionModifier.ADD_ACTION,
+                                                action_type = action_type,
+                                                params = params,
+                                                index = None
                                                 )
         #ajout d'un filterNode ou un analaysisNode
         return custom_items.ActionRequest(  action_modifier =

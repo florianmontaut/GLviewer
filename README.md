@@ -41,7 +41,15 @@ FNT 18/04
     du type QPaintDevice: Cannot destroy paint device that is being painted
 
 #Rev05 / Révision de l'import de fichier .csv du graphtec / :
-    ¤ MAJ majeure de la méthode openGLCsvFiles afin de pouvoir charger tout les types de fichiers venant des graphtecs et ce 
+    ¤ MAJ majeure de la méthode openGLCsvFiles afin de pouvoir charger tout les types de fichiers venant des graphtecs et ce
     peut importe la version du firmwire, software ou type de graphtec utilisé : testé avec des enregirstrement de 2015 à 2026
     venant de GL820, 840.
+
+#Rev06 / Révision du SelectionContext / :
+FNT 28/04
+    ¤ Modification de la méthode select_tree_from_context du TreeController afin de sélectionner le node, et non plus le signal
+    lorsque l'utilisateur ajoute un filtre ou une analyse.
+    ¤ Dans cette même méthode blockage du signal itemselected afin d'éviter un bouble appel de la méthode select_from_context
+    du main_controller (quand l'utilisateur cliquait sur une courbe, le graph_controller, puis le tree_controller étaient appelés)
+
 

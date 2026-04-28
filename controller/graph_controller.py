@@ -172,6 +172,7 @@ class GraphController(QtCore.QObject):
 
     def _on_curve_clicked(self,curve,event):
         sig = self._signal_from_curve(curve)
+        self.highlight(sig)
         #print(f'signal: {sig.display_name}')
         if isinstance(sig, DerivedSignalObject):
             ctx = SelectionContext(
@@ -190,7 +191,12 @@ class GraphController(QtCore.QObject):
         else:
             #print(f'failed: {sig} / {type(sig)}')
             return  # sécurité
-
+        try:
+            print(  "Graph_controller ligne 193: _on_curve_clicked => méthode appelée en cliquant sur une courbe: \n"+
+                f'Signal: {ctx.signal.display_name}, role: {ctx.role}, filter index: {ctx.filter_index}'+
+                f', Analysis index: {ctx.analysis_index}, derived index: {ctx.derived_index}\n')
+        except:
+            print('failed : échec d\'impression de données du CTX (Graph_controller)\n')
         self.curve_selected.emit(ctx)
 
     # ----------------------------------------------------
@@ -203,7 +209,7 @@ class GraphController(QtCore.QObject):
         curve.setPen(sig.pen)
         curve.setVisible(sig.visible)
         self.update_vbox()
-    
+
     def freeze_updates(self, freeze: bool):
         self.graph.setUpdatesEnabled(not freeze)
         self.vb.enableAutoRange(False)
@@ -215,7 +221,7 @@ class GraphController(QtCore.QObject):
     def select_graph_from_context(self,ctx:SelectionContext):
 
         self.highlight(ctx.signal)
-    
+
     def highlight(self, sig):
         """Met en surbrillance le signal sélectionné."""
 
@@ -249,7 +255,7 @@ class GraphController(QtCore.QObject):
     def remove_signal_curve(self, signal):
         curve = self.curves.pop(signal, None)
         if curve is not None:
-            
+
             self.plot.removeItem(curve)
             curve.setParentItem(None)
             curve.deleteLater()
@@ -331,7 +337,7 @@ class GraphController(QtCore.QObject):
                                                 macro_name)
 
     def on_selection_changed(self,sig:SignalObject=None):
-        
+
         # actuellement seul un signal d'un même DataFrame peut servir de référence.
         if sig is not None:
             states = SelectionState(
@@ -346,10 +352,10 @@ class GraphController(QtCore.QObject):
                                         has_reference = False,
                                         is_recording= self.macro_recording
                                         )
-        
+
         self.menu.update_enabled_states(states)
 
 
     def set_reference_signal(self, sig : SignalObject):
-        
+
         self.reference_sig = sig
