@@ -77,7 +77,11 @@ class ParameterController(QObject):
         if ctx.analysis_index is not None:
             #? dans ce cas, on veut éditer les paramètres d'une analyse spécifique
             node = ctx.signal.analyses[ctx.analysis_index]
-            available_signals = []
+            if "reference" in node.get_params().keys():
+                ext_file=node.get_param('reference').file
+                available_signals = [ s for s in ext_file.signals if s is not sig]
+            else:
+                available_signals = []
         elif ctx.filter_index is not None:
             #? dans ce cas, on veut éditer les paramètres d'un filtre spécifique
             node = sig.pipeline[ctx.filter_index]
@@ -125,6 +129,7 @@ class ParameterController(QObject):
             ptype = spec["type"]
             #la valeur actuelle sauvegardée dans le filter node est récupérée içi
             # ---------- GROUP ----------
+            print(param_name,spec)
             if ptype == "group":
                 # permet de construire récursivement les groupes imbriqués
                 if group_key is not None:

@@ -276,18 +276,25 @@ class ImportController(QtCore.QObject):
     def _get_import_settings(self,params):
         self.txt_import_settings=params
 
-    def ImportWizard(self,adress, delim=None, unitDelim=None):
+    def ImportWizard(self,adress,params=None):
 
+        if params is None:
+            delim       = None
+            unitDelim   = None
+        else:
+            delim       = params.get('delim',None)
+            unitDelim   = params.get('unitDelim',None)
+            
         if delim is None:
-            delim=self.opts["default_delimitor"]
+            delim = self.opts["default_delimitor"]
         if unitDelim is None:
-            unitDelim=self.opts["default_unit_separator"]
+            unitDelim = self.opts["default_unit_separator"]
 
         userInput = custom_dialogs.ImportWizardDialog(
-            adress=adress,
-            delimitor=delim,
-            unitDelim=unitDelim
-        )
+                                                        adress=adress,
+                                                        delimitor=delim,
+                                                        unitDelim=unitDelim
+                                                    )
         userInput.params_ready.connect(self._get_import_settings)
 
         result = userInput.exec()
@@ -538,10 +545,10 @@ class ImportController(QtCore.QObject):
         #On remplace "Trigger time" par sa valeur. "Start time" ne correspond
         #pas au début de l'enregistrement
 
-    def openProject(self,projectPath):
+    def openProject(self,fname,settings=None):
 
         self._from_project=custom_types.ImportMode.RESTORE
-        with open(projectPath, "r", encoding="utf-8") as f:
+        with open(fname, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         ws = Workspace()
@@ -583,7 +590,7 @@ class ImportController(QtCore.QObject):
         self.project_signal.emit(ws)
 
 
-    def loaderSelect(self,loadStruct:tuple[custom_types.fileType,list[str]]):
+    def loaderSelect(self,loadStruct:dict):
         """
         Méthode gérant la réception des données du viewer. Cette dernière utilise la méthode
         liée à l'extension du(es) fichier(s) à charger. Seul plusieurs fichiers du même type
@@ -596,38 +603,41 @@ class ImportController(QtCore.QObject):
                 None        --
         """
 
-        fileType,fnames=loadStruct
-        for fname in fnames:
-            try:
-                import_request=self.load_dict[fileType]
-                import_request.loader(fname)
+        fileType    =   custom_types.fileType[loadStruct["file_type"]]
+        fname      =   loadStruct["address"]
+        params      =   loadStruct["import_params"]
 
-            except custom_exceptions.TxtDelimiterError  as e:
-                QtWidgets.QMessageBox.warning(self,
-                                    "Séparateur des colonnes invalide",
-                                    str(e)+'\n Veuillez vérifier le type de séparaterur utilisé.')
-                self.ImportWizard(fname)
-            except custom_exceptions.TxtFormatError  as e:
-                QtWidgets.QMessageBox.warning(self,
-                                    "Format invalide",
-                                    str(e)+'\n Veuillez vérifier le format du fichier.')
-                self.ImportWizard(fname)
-            except custom_exceptions.CsvStructureError  as e:
-                QtWidgets.QMessageBox.warning(self,
-                                    "Structure de donnée invalide",
-                                    str(e)+'\n Veuillez vérifier la structure du fichier CSV.')
-                self.ImportWizard(fname)
-            except custom_exceptions.GLStructureError  as e:
-                QtWidgets.QMessageBox.warning(self,
-                                    "Structure de donnée invalide",
-                                    str(e)+'\n Veuillez vérifier la structure du fichier GL.')
-                self.ImportWizard(fname)
-            except Exception as err:
-                errorStruct=[err,fileType,fname]
-                self.ImportErrorUserWarning(errorStruct)
+        try:
+            import_request=self.load_dict[fileType]
+            message,_ = import_request.loader_label
+            self.view.statusbar.showMessage(message,3000)
+            import_request.loader(fname=fname,settings=params)
+        except custom_exceptions.TxtDelimiterError  as e:
+            QtWidgets.QMessageBox.warning(self,
+                                "Séparateur des colonnes invalide",
+                                str(e)+'\n Veuillez vérifier le type de séparaterur utilisé.')
+            self.ImportWizard(fname,params)
+        except custom_exceptions.TxtFormatError  as e:
+            QtWidgets.QMessageBox.warning(self,
+                                "Format invalide",
+                                str(e)+'\n Veuillez vérifier le format du fichier.')
+            self.ImportWizard(fname,params)
+        except custom_exceptions.CsvStructureError  as e:
+            QtWidgets.QMessageBox.warning(self,
+                                "Structure de donnée invalide",
+                                str(e)+'\n Veuillez vérifier la structure du fichier CSV.')
+            self.ImportWizard(fname,params)
+        except custom_exceptions.GLStructureError  as e:
+            QtWidgets.QMessageBox.warning(self,
+                                "Structure de donnée invalide",
+                                str(e)+'\n Veuillez vérifier la structure du fichier GL.')
+            self.ImportWizard(fname,params)
+        except Exception as err:
+            errorStruct=[err,fileType,fname,params]
+            self.ImportErrorUserWarning(errorStruct)
 
 
-    def load_file_dialog(self,fileType : custom_types.fileType.GL,adress = None):
+    def load_file_dialog(self,fileType:custom_types.fileType,adress=None):
         """
         Méthode gérant la fenêtre de dialogue permettant de charger des fichiers .CSV
         de type GLviewer dans l'appli.
@@ -638,26 +648,22 @@ class ImportController(QtCore.QObject):
         Returns:
                 None        --
         """
+        
         import_request : custom_items.ImportRequest = self.load_dict[fileType]
-        if adress is not None:
-            fnames=[adress]
 
-        else:
-            message,file_extension = import_request.loader_label
-            self.view.statusbar.showMessage(message,3000)
-            fnames,_ = QtWidgets.QFileDialog.getOpenFileNames(  self.view,"Open file",
+        message,file_extension = import_request.loader_label
+        self.view.statusbar.showMessage(message,3000)
+        fname,_ = QtWidgets.QFileDialog.getOpenFileName(  self.view,"Open file",
                                                                 self.defaultAdress,
                                                                 file_extension)
-        if not fnames:
+        if not fname:
             return
 
-        if isinstance(fnames,list):
-            adress=fnames[0]
-
-        for fname in fnames:
-            if fname:
-                try:
-                    self.view.statusbar.showMessage(f"Loading file: {fname}",3000)
-                    import_request.loader(fname)
-                except Exception as e :
-                    self.ImportWizard(fname)
+        if isinstance(fname,list):
+            fname=fname[0]
+        
+        try:
+            self.view.statusbar.showMessage(f"Loading file: {fname}",3000)
+            import_request.loader(fname=fname)
+        except Exception as e :
+                self.ImportWizard(fname)

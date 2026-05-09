@@ -429,6 +429,8 @@ class PipelineTreeModel(QAbstractItemModel):
 
     def update_analysis(self, sig: SignalObject, index: int):
         """Met à jour l'affichage d'une analyse après modification."""
+        #! actuellement si l'utilisateur modifie un analysisNode alors qu'un filternode
+        #! est présent, le filter est alors écrasé
         sig_item = self.find_item(self.root, sig)
         if sig_item is None:
             return

@@ -53,3 +53,6 @@ FNT 28/04
     du main_controller (quand l'utilisateur cliquait sur une courbe, le graph_controller, puis le tree_controller étaient appelés)
 
 
+#Rev07 / Révision du chargement des fichiers / :
+FNT 09/05
+    ¤ Modification de la gestion de l'import des fichiers de manière à sauvegarder les paramètres utilisés lors du dernier import (utilisé principalement par la méthode openTxt)

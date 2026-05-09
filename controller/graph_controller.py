@@ -191,12 +191,12 @@ class GraphController(QtCore.QObject):
         else:
             #print(f'failed: {sig} / {type(sig)}')
             return  # sécurité
-        try:
+        """try:
             print(  "Graph_controller ligne 193: _on_curve_clicked => méthode appelée en cliquant sur une courbe: \n"+
                 f'Signal: {ctx.signal.display_name}, role: {ctx.role}, filter index: {ctx.filter_index}'+
                 f', Analysis index: {ctx.analysis_index}, derived index: {ctx.derived_index}\n')
         except:
-            print('failed : échec d\'impression de données du CTX (Graph_controller)\n')
+            print('failed : échec d\'impression de données du CTX (Graph_controller)\n')"""
         self.curve_selected.emit(ctx)
 
     # ----------------------------------------------------
@@ -224,7 +224,8 @@ class GraphController(QtCore.QObject):
 
     def highlight(self, sig):
         """Met en surbrillance le signal sélectionné."""
-
+        if sig not in self.curves.keys():
+            return
         curve = self.curves[sig]
         self._update_cursor_color(curve)
         self.on_selection_changed(sig)

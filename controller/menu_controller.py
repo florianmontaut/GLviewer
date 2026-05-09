@@ -14,7 +14,7 @@ class MenuController(QtCore.QObject):
     - MAJ des dossiers récents
     """
 
-    loadSignal = QtCore.pyqtSignal(custom_types.fileType,str)
+    loadSignal = QtCore.pyqtSignal(dict)
     newOptions = QtCore.pyqtSignal(dict)
 
     def __init__(self, view : QMainWindow, schema : dict , app_name : str ='NewApp'):
@@ -34,8 +34,13 @@ class MenuController(QtCore.QObject):
             data = json.load(f)
             
         params = data.get("settings",{})
+        
+        if params:
+            self.params = self._deserialize_dict(params)
+        else:
+            #!defaut params!
+            self.params = {}
             
-        self.params = self._deserialize_dict(params)
         self.user_config=user_config
 
         self.update_recent_files_menu()
@@ -65,47 +70,45 @@ class MenuController(QtCore.QObject):
             return
         
         #lines n'est pas vide, on récupère l'ensemble des données 
-        path=lines[0][1]
+        path=lines[0]["address"]
         latest_dir=path[:path.rindex('/')]
         self.view.latest_dir=latest_dir
-        for f_type,f_path in lines:
-            if f_type not in custom_types.fileType.__members__ or not f_path:
+        for loader in lines:
+            
+            if (loader["file_type"] not in custom_types.fileType.__members__
+                or not loader["address"]):
                 continue
-            action = QtGui.QAction(f_path, self)
-            action.setData((f_type, f_path))
+            action = QtGui.QAction(loader["address"], self)
+            action.setData(loader)
             action.triggered.connect(self._on_recent_file_triggered)
             self.view.recent_files_menu.addAction(action)
 
     def _on_recent_file_triggered(self):
         action = self.sender()
-        f_type, f_path = action.data()
-        self.loadSignal.emit(custom_types.fileType[f_type], f_path)
+        loader_struct = action.data()
+        self.loadSignal.emit(loader_struct)
 
-    def save_recent_file_address(self, file_struct):
+    def save_recent_file_address(self, new_loader):
         if not os.path.exists(self.user_config):
             with open(self.user_config, "w") as f:
                 json.dump({"files": []}, f)
         with open(self.user_config, "r") as f:
             data = json.load(f)
-        lines = data.get("files", [])
-        file_loader,file_path=file_struct
+        file_loaders = data.get("files", [])
         #si l'adresse existe déjà dans la liste on la retire
         index=None
-        for n,line in enumerate(lines):
-            _,f_path = line
-            if file_path == f_path:
+        for n,loader_struct in enumerate(file_loaders):
+            if new_loader["address"] == loader_struct["address"]:
                 index=n
                 break
         if index is not None:
-            lines.pop(index)
+            file_loaders.pop(index)
 
         #on ne garde que les 10 fichiers les plus récents
-        lines.insert(0,[file_loader,file_path])
-        lines = lines[:10]
-        for line in lines:
-            _,f_path=line
+        file_loaders.insert(0,new_loader)
+        file_loaders = file_loaders[:10]
         with open(self.user_config, "w") as f:
-            data["files"]=lines
+            data["files"]=file_loaders
             json.dump(data, f, indent=4)
         self.update_recent_files_menu()
 

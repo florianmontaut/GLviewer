@@ -131,7 +131,7 @@ class MainController(QtCore.QObject):
             if file_obj.address in [file.address for file in self.workspace.files]:
                 return
 
-        self.menu_ctrl.save_recent_file_address([file_obj.file_type,file_obj.address])
+        self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
         self.workspace.add_file(file_obj)
 
         # Construire QAbstractItemModel
@@ -182,7 +182,7 @@ class MainController(QtCore.QObject):
         self._connect_workspace_signals()
 
         for file_obj in self.workspace.files:
-            self.menu_ctrl.save_recent_file_address([file_obj.file_type,file_obj.address])
+            self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
             for sig in file_obj.signals:
                 self.graph_ctrl.add_signal_curve(sig)
                 for analysis in sig.analyses:
@@ -300,7 +300,7 @@ class MainController(QtCore.QObject):
         # --------------------------------------------------
         # 5. Chargement ParameterTree
         # --------------------------------------------------
-        print(f'{source}')
+        #print(f'{source}')
         self.param_ctrl.load_params(ctx)
 
 
@@ -387,7 +387,7 @@ class MainController(QtCore.QObject):
         Connecte les signaux émis par le MenuController à des slots du MainController.
         """
         #? Envoi direct à un autre controller sans vérification du main_controller ?
-        self.menu_ctrl.loadSignal.connect(self.import_ctrl.load_file_dialog)
+        self.menu_ctrl.loadSignal.connect(self.import_ctrl.loaderSelect)
         self.menu_ctrl.newOptions.connect(self._on_new_settings)
 
     def _on_new_settings(self, settings: dict):
@@ -764,7 +764,6 @@ class MainController(QtCore.QObject):
 
         #! en mettant le RAZ dans cette méthode le soft risque de bloquer la création
         #! des macros dès le premier défaut
-        print("fb du workspace on macro created")
         self.tree_ctrl.macro_recording=False
         self.graph_ctrl.macro_recording=False
 

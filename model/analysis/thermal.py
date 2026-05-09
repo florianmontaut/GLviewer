@@ -44,7 +44,7 @@ class ThermalModelAnalysis(AnalysisNode):
         'Model definition range':{
                         "type": "cursors",
                         "visible":False,
-                        "default": (0,1200),
+                        "default": [0,1200],
                         "expanded" : True,
                         "cursors_setting":{
                                 'angle':90,

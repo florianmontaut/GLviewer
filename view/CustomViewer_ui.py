@@ -1,4 +1,4 @@
-# Form implementation generated from reading ui file 'c:\Users\florian_tour\Documents\dev\.venv\copilot\MVC\view\CustomViewer.ui'
+# Form implementation generated from reading ui file 'c:\Users\florian_tour\Documents\dev\.venv\copilot\GLviewer\view\CustomViewer.ui'
 #
 # Created by: PyQt6 UI code generator 6.4.2
 #

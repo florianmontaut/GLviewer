@@ -110,6 +110,8 @@ class WorkspaceController(QtCore.QObject):
 
 
     def push(self,sig,action_request:ActionRequest):
+        #TODO: utilise l'attribut id des nodes pour les identifier plutôt que par leur position
+        #TODO: dans la pile.
 
         if action_request is None:
             return

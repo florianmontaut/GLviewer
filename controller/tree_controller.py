@@ -120,12 +120,12 @@ class TreeController(QtCore.QObject):
                 item: TreeItem = index.internalPointer()
                 obj = item.data
                 obj.is_selected = False
-        try:
+        """try:
             print(  "Tree_controller ligne 123: _on_selection_changed => méthode appelée en cliquant sur un treeItem: \n"+
                     f'Signal: {ctx.signal.display_name}, role: {ctx.role}, filter index: {ctx.filter_index}'+
                     f', Analysis index: {ctx.analysis_index}, derived index: {ctx.derived_index}\n')
         except:
-            print('failed : échec d\'impression de données du CTX (Tree_controller)\n')
+            print('failed : échec d\'impression de données du CTX (Tree_controller)\n')"""
         self.item_selected.emit(ctx)
 
 
@@ -159,6 +159,7 @@ class TreeController(QtCore.QObject):
 
         if role == custom_items.itemType.ANALYSE:
             sig = item.parent.data
+            #! la modification/update du signal ext plante. 02/05
             return SelectionContext(
                 role=role,
                 signal=sig,
@@ -213,8 +214,8 @@ class TreeController(QtCore.QObject):
             analysis_item = sig_item.child(ctx.derived_index)
             index = self.model.index(ctx.derived_index, 0, parent_index)
 
-        print(  f'Ligne 217: {index.internalPointer().data.display_name}'+
-                f'{ctx.signal.display_name}')
+        """print(  f'Ligne 217: {index.internalPointer().data.display_name}'+
+                f'{ctx.signal.display_name}')"""
         if index is None or not index.isValid():
             return
 

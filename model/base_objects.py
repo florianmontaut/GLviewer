@@ -192,10 +192,18 @@ class FileObject:
 
     def to_dict(self):
 
-        arg_to_export= ['file_type','import_params','address','signals']
-        obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
+        obj_params=self.get_file_loader_params()
+        arg_to_export= ['signals']
+        obj_params.update({k: v for k, v in self.__dict__.items() if k in arg_to_export })
         obj_params['signals'] = [sig.to_dict() for sig in obj_params['signals']]
 
+        return obj_params
+    
+    def get_file_loader_params(self):
+        
+        arg_to_export= ['file_type','import_params','address']
+        obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
+        
         return obj_params
 
     def resolve_filter_references(self):
