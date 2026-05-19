@@ -6,6 +6,7 @@ from PyQt6.QtCore import Qt
 from scipy.optimize import curve_fit
 
 from ressources import custom_items
+from ressources.custom_exceptions import InvalidModelFit
 from .base_analysis import AnalysisNode
 from ressources import custom_types
 from model.base_objects import DerivedSignalObject,SignalObject
@@ -43,7 +44,7 @@ class ThermalModelAnalysis(AnalysisNode):
                         },
         'Model definition range':{
                         "type": "cursors",
-                        "visible":False,
+                        "visible":True,
                         "default": [0,1200],
                         "expanded" : True,
                         "cursors_setting":{
@@ -156,6 +157,17 @@ class ThermalModelAnalysis(AnalysisNode):
 
         # --- Erreur ---
         y_pred = thermal_step(x_fit, *params)
+
+        if abs(T_inf) > 15 * max(abs(y_fit)):
+            raise InvalidModelFit(
+                "T_inf est physiquement incohérent avec les données"
+            )
+
+        if tau > 100 * x_fit[-1]:
+            raise InvalidModelFit(
+                "Constante de temps irréaliste (tau >> durée de mesure)"
+            )
+
         rmse = np.sqrt(np.mean((y_pred - y_fit) ** 2))
 
         # --- Stockage ---
@@ -232,9 +244,6 @@ class ThermalModelAnalysis(AnalysisNode):
         if self.t_end is None:
             self.t_end = x[-1]
         self.results=self.run(x,y,self.get_param('power'))
-
-        if self.results is None:
-            raise RuntimeError("Model not computed")
 
         x_model, y_model = self.generate_model_curve()
 

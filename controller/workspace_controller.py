@@ -4,7 +4,7 @@ from controller.commands.action_registery import ActionRegistry
 from controller.commands.macro import Macro,MacroCommand
 from ressources.custom_types import qSignalType, ActionModifier
 from ressources.custom_items import ActionRequest,itemType
-from ressources.custom_exceptions import MissingParameters
+from ressources.custom_exceptions import MissingParameters,AnalysisError,InvalidModelFit
 from ressources.custom_dialogs import AnalysisParamsDialog
 from model.base_objects import SignalObject,SelectionContext
 
@@ -123,6 +123,19 @@ class WorkspaceController(QtCore.QObject):
 
         except MissingParameters as e:
             self._ask_missing_params( sig,action_request,e.missing_params)
+
+            return
+        
+        except InvalidModelFit as e:
+            print('ligne 130: exception !')
+            self._ask_missing_params( sig,action_request,e.missing_params)
+            QtWidgets.QMessageBox.warning(
+                                            None,
+                                            "Analyse impossible",
+                                            f"L'analyse a échoué :\n{e}"
+                                        )
+            return
+        
         finally:
             self.graph_controller.freeze_updates(False)
 
@@ -184,6 +197,7 @@ class WorkspaceController(QtCore.QObject):
                                 missing_params: dict
                             )->dict:
 
+        print('Missing parameter asked!')
         dialog = AnalysisParamsDialog(missing_params,action_request.action_type)
         def resume_creation(new_params):
             merged =    {

@@ -70,6 +70,9 @@ class MenuController(QtCore.QObject):
             return
         
         #lines n'est pas vide, on récupère l'ensemble des données 
+        if not isinstance(lines[0],dict):
+            print("failed to load recent file menu")
+            return
         path=lines[0]["address"]
         latest_dir=path[:path.rindex('/')]
         self.view.latest_dir=latest_dir

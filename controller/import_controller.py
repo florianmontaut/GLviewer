@@ -33,7 +33,7 @@ class ImportController(QtCore.QObject):
                             custom_items.ImportRequest(
                                                     file_format=custom_types.fileType.TXT,
                                                     loader_label=("Loading .txt files",
-                                                                "txt Files (*.txt)"),
+                                                                "txt Files (*.txt),csv Files (*.csv)"),
                                                     loader= self.openTxt
                                                     ),
                             custom_types.fileType.CSV:
@@ -661,9 +661,10 @@ class ImportController(QtCore.QObject):
 
         if isinstance(fname,list):
             fname=fname[0]
-        
+
         try:
             self.view.statusbar.showMessage(f"Loading file: {fname}",3000)
             import_request.loader(fname=fname)
         except Exception as e :
-                self.ImportWizard(fname)
+            print(e)
+            self.ImportWizard(fname)

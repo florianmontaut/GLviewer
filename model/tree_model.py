@@ -228,8 +228,8 @@ class PipelineTreeModel(QAbstractItemModel):
                 return QBrush(QColor("#000000"))  # noir profond
 
     # ---------------- Checkbox ----------------
-        if (role == Qt.ItemDataRole.CheckStateRole and obj_type == itemType.DERIVED and
-            obj_type == itemType.RAW and col == 0):
+        if (role == Qt.ItemDataRole.CheckStateRole and (obj_type == itemType.DERIVED or
+            obj_type == itemType.RAW) and col == 0):
             return Qt.CheckState.Checked if obj.visible else Qt.CheckState.Unchecked
 
     # ---------------- Background color ----------------

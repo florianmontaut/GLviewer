@@ -53,3 +53,14 @@ class GLStructureError(GLImportError):
 class JSONStructureError(JSONImportError):
     """Colonnes incohérentes / lignes invalides"""
     pass
+
+class AnalysisError(Exception):
+    """Erreur générique d'analyse."""
+    pass
+
+
+class InvalidModelFit(AnalysisError):
+    """Le modèle est mathématiquement ou physiquement invalide."""
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason

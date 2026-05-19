@@ -144,7 +144,9 @@ class ComplementaryElements(pTypes.GroupParameter):
         if self.b.value()<=self.a.value():
             self.b.setValue(self.a.value()+1, blockSignal=self.bChanged)
 
-
+    def value(self):
+        return {'start':self.a.value(),
+                'stop':self.b.value()}
 
 class LinkedCursors(pTypes.GroupParameter):
     """
@@ -156,7 +158,6 @@ class LinkedCursors(pTypes.GroupParameter):
         opts['expanded']=False
         self.linkedojects=[]
         self.cursors=[]
-        self.arrows=[]
         self.oldState=[0,0]
         self.graph=graphWidget
         self.sig_cursor_1=None
@@ -173,12 +174,6 @@ class LinkedCursors(pTypes.GroupParameter):
                 angle=0+180*i
             else:
                 angle=90+180*i
-            self.arrows.append(pg.ArrowItem(angle=angle,
-                                            tipAngle=30,
-                                            baseAngle=00,
-                                            headLen=10,
-                                            tailLen=50,
-                                            pos=(value,50)))
 
         #passages des options à la classe parent GroupParameter
         pTypes.GroupParameter.__init__(self, **opts)
@@ -191,7 +186,6 @@ class LinkedCursors(pTypes.GroupParameter):
 
         params=[
                     {'name':'show cursors', 'type': 'bool','value':False},
-                    {'name':'show delta on graph','type':'bool','value':False},
                     {'name':'cursor 1', 'type': 'float','value':values[0]},
                     {'name':'cursor 2', 'type': 'float','value':values[1]},
                     {'name':'delta','type': 'float','value':values[1]-values[0],'readonly': True}
@@ -224,20 +218,6 @@ class LinkedCursors(pTypes.GroupParameter):
             self.graph.removeItem(self.cursors[0])
             self.graph.removeItem(self.cursors[1])
 
-    def arrowsState(self,state):
-        """
-        Méthode permettant d'ajouter ou retirer les flèches
-        Args:
-            state {bool} -- état logique du paramètre "Show delta"
-        """
-        if state:
-            #on recharge les droites représentant le curseur
-            self.graph.addItem(self.arrows[0], ignoreBounds=True)
-            self.graph.addItem(self.arrows[1], ignoreBounds=True)
-        else:
-            #on recharge les droites représentant le curseur
-            self.graph.removeItem(self.arrows[0])
-            self.graph.removeItem(self.arrows[1])
 
 
     def updateGraph(self,changes):
@@ -251,8 +231,6 @@ class LinkedCursors(pTypes.GroupParameter):
         if changes['show cursors']!=self.oldState[0]:
             self.oldState[0]=changes['show cursors']
             self.cursorsState(self.param('show cursors').value())
-        elif changes['show delta on graph']!=self.oldState[1]:
-            self.arrowsState(self.param('show delta on graph').value())
 
 
     def updateDelta(self):
@@ -265,10 +243,7 @@ class LinkedCursors(pTypes.GroupParameter):
 
         self.param('delta').setValue(self.param('cursor 2').value()-self.param('cursor 1').value())
         #todo : test si delta vertical/horizontal
-        if self.param('show delta on graph').value():
-            self.arrows[0].setPos(self.param('cursor 1').value(),50)
-            self.arrows[1].setPos(self.param('cursor 2').value(),50)
-
+        
     def newLinkedObjects(self,field,item,**opts):
         """
         Méthode permettant de relier la position d'un item graphique à un paramaterItem
@@ -322,7 +297,7 @@ class LinkedCursors(pTypes.GroupParameter):
         item.sigPositionChanged.connect(self.linkedojects[index][1])
 
 
-    def getParams(self):
+    def value(self):
         """
         Méthode retourant toute les données des deux curseurs: positions 1 & 2 ainsi que le delta
         Returns:

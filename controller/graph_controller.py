@@ -5,8 +5,7 @@ from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
 from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
-from ressources.custom_menu import SelectionState
-from ressources import custom_graph_functions,custom_types,custom_items
+from ressources import custom_graph_functions,custom_types,custom_items,custom_menu
 
 from controller.graph_context_menu_controller import GraphContextMenu
 from controller.graph_option_controller import GraphTreeController
@@ -341,14 +340,14 @@ class GraphController(QtCore.QObject):
 
         # actuellement seul un signal d'un même DataFrame peut servir de référence.
         if sig is not None:
-            states = SelectionState(
+            states = custom_menu.SelectionState(
                                         has_selection = True,
                                         has_reference = (self.reference_sig is not None and
                                                         not sig.is_reference) ,
                                         is_recording= self.macro_recording
                                         )
         else:
-            states = SelectionState(
+            states = custom_menu.SelectionState(
                                         has_selection = False,
                                         has_reference = False,
                                         is_recording= self.macro_recording

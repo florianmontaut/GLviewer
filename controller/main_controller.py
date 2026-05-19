@@ -4,6 +4,7 @@
 from operator import index
 
 import pandas as pd
+import pyqtgraph as pg
 from PyQt6 import QtCore,QtGui
 
 from model.base_objects import (DerivedSignalObject, FileObject, SignalObject,
@@ -50,7 +51,8 @@ class MainController(QtCore.QObject):
         # transmettre aux autres contrôleur
         self.menu_ctrl      = MenuController(view, params, 'MVC_test')
         self.graph_ctrl     = GraphController(view.maingraph,view.graphTree)
-        self.param_ctrl     = ParameterController(view.selectiontree,view.graphTree)
+        plotItem=[item for item in view.maingraph.items() if isinstance(item,pg.PlotItem)][0]
+        self.param_ctrl     = ParameterController(view.selectiontree,plotItem)
 
         self.cursor_ctrl    = CursorController()
 

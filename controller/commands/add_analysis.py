@@ -30,11 +30,13 @@ class AddAnalysisCommand(ReplayableCommand):
         try:
             self.derived_signal = self.analysis_node.compute(self.signal)
             self.signal.derived_signals.append(self.derived_signal)
-        except Exception as e:
-            # rollback si computation échoue
+        
+        except Exception:
             self.signal.analyses.pop(self.index)
-            raise RuntimeError(f"Analysis computation failed: {e}")
+            raise
 
+            
+        print('redo continue')
         # Notifier le modèle (TreeView)
         self.model.insert_analysis(self.signal, self.analysis_node, self.index)
 
