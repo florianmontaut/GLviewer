@@ -18,24 +18,32 @@ class AddAnalysisCommand(ReplayableCommand):
         self.analysis_node = analysis_node
         self.model = model
         self.index = index
+        self.error = None
         self.derived_signal = None  # sera créé en redo()
 
-    def redo(self):
+
+
+    def prepare(self):
         if self.index is None:
             self.index = len(self.signal.analyses)
+        self.derived_signal = self.analysis_node.compute(self.signal)
+
+    def redo(self):
+
         # Ajouter l'analyse
         self.signal.analyses.insert(self.index, self.analysis_node)
 
         # Calculer et ajouter le signal dérivé
-        try:
+        '''try:
             self.derived_signal = self.analysis_node.compute(self.signal)
             self.signal.derived_signals.append(self.derived_signal)
         
-        except Exception:
+        except Exception as e:
             self.signal.analyses.pop(self.index)
-            raise
+            self.error = e
+            return'''
 
-            
+        
         print('redo continue')
         # Notifier le modèle (TreeView)
         self.model.insert_analysis(self.signal, self.analysis_node, self.index)

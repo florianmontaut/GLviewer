@@ -157,13 +157,16 @@ class ThermalModelAnalysis(AnalysisNode):
 
         # --- Erreur ---
         y_pred = thermal_step(x_fit, *params)
+        print(f'max de y_fit:{max(abs(y_fit))} vs T_inf calculée: {T_inf}')
+        print(f'max de x_fit:{x_fit[-1]} vs tau calculé: {tau}')
+
 
         if abs(T_inf) > 15 * max(abs(y_fit)):
             raise InvalidModelFit(
                 "T_inf est physiquement incohérent avec les données"
             )
 
-        if tau > 100 * x_fit[-1]:
+        if tau > 100 * x_fit[-1] or tau <0:
             raise InvalidModelFit(
                 "Constante de temps irréaliste (tau >> durée de mesure)"
             )

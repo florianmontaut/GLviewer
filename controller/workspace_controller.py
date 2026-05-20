@@ -116,29 +116,35 @@ class WorkspaceController(QtCore.QObject):
         if action_request is None:
             return
         action_request.model = self.model
+        
+        self.graph_controller.freeze_updates(True)
+        cmd=self.registry.execute(sig,action_request)
         try:
-            self.graph_controller.freeze_updates(True)
-            cmd=self.registry.execute(sig,action_request)
-            self.undo_stack.push(cmd)
+            # si la commande est de nature à échouer (modélisation / analyse complexe)
+            # on essaie de générer le signal dérivé, i.e le résultat de l'analyse et
+            # dans le cas d'un échec on traite les erreurs.
+            if hasattr(cmd, "prepare"):
+                cmd.prepare() 
 
-        except MissingParameters as e:
-            self._ask_missing_params( sig,action_request,e.missing_params)
+        except Exception as e:
+            #! créer une méthode handleError
+            if isinstance(e, InvalidModelFit):
+                self._ask_missing_params(sig, action_request, getattr(e, "missing_params", {}))
+                QtWidgets.QMessageBox.warning(
+                                                None,
+                                                "Analyse impossible",
+                                                f"L'analyse a échoué :\n{e}"
+                                            )
+                return
+            elif isinstance(e, MissingParameters):
+                self._ask_missing_params(sig, action_request, e.missing_params)
+                return
 
-            return
-        
-        except InvalidModelFit as e:
-            print('ligne 130: exception !')
-            self._ask_missing_params( sig,action_request,e.missing_params)
-            QtWidgets.QMessageBox.warning(
-                                            None,
-                                            "Analyse impossible",
-                                            f"L'analyse a échoué :\n{e}"
-                                        )
-            return
-        
         finally:
             self.graph_controller.freeze_updates(False)
 
+        self.undo_stack.push(cmd)
+        
         if self._macro_buffer is not None:
             self._macro_buffer.append(action_request)
 

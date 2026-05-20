@@ -1,0 +1,122 @@
+
+@startuml
+
+title Signal Dataflow (Filters + Analyses + Derived Signals)
+
+skinparam linetype ortho
+
+' =========================
+' === SOURCE DATA =========
+' =========================
+
+class FileObject {
+    raw data (csv, etc.)
+}
+
+class SignalObject {
+    + x : ndarray
+    + y : ndarray
+    --
+    pipeline : FilterNode[]
+    analyses : AnalysisNode[]
+    derived_signals : DerivedSignalObject[]
+}
+
+FileObject --> SignalObject : import
+
+' =========================
+' === FILTER PIPELINE =====
+' =========================
+
+abstract class FilterNode {
+    + apply(x, y) : (x, y)
+}
+
+class LowPassFilter
+class OffsetFilter
+class DiffFilter
+
+FilterNode <|-- LowPassFilter
+FilterNode <|-- OffsetFilter
+FilterNode <|-- DiffFilter
+
+SignalObject --> FilterNode : pipeline[]
+
+note right of FilterNode
+Non-destructive:
+- original data never modified
+- applied dynamically
+end note
+
+' =========================
+' === FILTERED SIGNAL =====
+' =========================
+
+class "Filtered Signal (virtual)" as FilteredSignal
+
+SignalObject --> FilteredSignal : apply pipeline
+FilterNode --> FilteredSignal
+
+note right of FilteredSignal
+Computed on demand:
+x_filtered, y_filtered
+end note
+
+' =========================
+' === ANALYSES ============
+' =========================
+
+abstract class AnalysisNode {
+    + compute(signal) : DerivedSignalObject
+}
+
+class ThermalModelAnalysis
+class FFTAnalysis
+
+AnalysisNode <|-- ThermalModelAnalysis
+AnalysisNode <|-- FFTAnalysis
+
+SignalObject --> AnalysisNode : analyses[]
+
+note left of AnalysisNode
+Consumes filtered signal
+(not raw)
+end note
+
+' =========================
+' === DERIVED SIGNALS =====
+' =========================
+
+class DerivedSignalObject {
+    + x
+    + y
+    + metadata
+}
+
+AnalysisNode --> DerivedSignalObject : compute()
+
+SignalObject --> DerivedSignalObject : stores
+
+note bottom of DerivedSignalObject
+Materialized result:
+- persistent
+- independent data
+end note
+
+' =========================
+' === GRAPH / VIEW ========
+' =========================
+
+class GraphController
+
+GraphController --> SignalObject
+GraphController --> DerivedSignalObject
+
+note right of GraphController
+Displays:
+- filtered signal
+- derived signals
+end note
+
+@enduml
+

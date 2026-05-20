@@ -9,6 +9,54 @@ from controller.commands.remove_analysis import RemoveAnalysisCommand
 from controller.commands.modify_analysis import ModifyAnalysisCommand
 from ressources.custom_items import ActionRequest,AddDescriptor
 
+
+
+
+# les classes Factory retourne des callables qui sont utilisés dans le workspace_controller
+# exemple, la commande est obtenue à l'appelle de la méthode execute de registry
+# la clé du dictionnaire est passé par l'actionRequest, qui retourne un callable
+# dont les attributs sont forcément sig,params,model et index, eux-mêmes attribut du
+# action request. C'est un pointeur de fonctions, dont la création est dynamique (on ne
+# créer pas les commandes 1 à 1 à la main)
+
+class AddNodeFactory:
+
+    def __init__(self, node_type, node_factory):
+        self.node_type = node_type
+        self.node_factory = node_factory
+
+    def __call__(self, sig, params, model, index):
+        node = self.node_factory().create({
+                                                "type": self.node_type.name,
+                                                "params": params
+                                                })
+        if self.node_factory is FilterFactory:
+            return AddFilterCommand(sig, node, model, index)
+        else:
+            return AddAnalysisCommand(sig, node, model, index)
+
+class ModifyNodeFactory:
+
+    def __init__(self,is_filter:bool):
+        self.is_filter=is_filter
+        
+    def __call__(self, sig, params, model, index):
+        if self.is_filter :
+            return ModifyFilterCommand(sig, model, index)
+        else:
+            return ModifyAnalysisCommand(sig, params, model, index)
+
+class RemoveNodeFactory:
+    def __init__(self,is_filter:bool):
+        self.is_filter=is_filter
+    def __call__(self, sig, params, model, index):
+        if self.is_filter :
+            return RemoveFilterCommand(sig, model, index)
+        else:
+            return RemoveAnalysisCommand(sig, model, index)
+
+
+
 class ActionRegistry:
 
     def __init__(self):
@@ -18,6 +66,11 @@ class ActionRegistry:
     def register(self,  action_modifier: ActionModifier,
                         action_key: qSignalType,
                         factory):
+        key = (action_modifier, action_key)
+        
+        if key in self._factories:
+            print(f"⚠️ Overwriting factory for {key}")
+
         self._factories[(action_modifier,action_key)] = factory
 
     def execute(self,sig, action_request:ActionRequest):
@@ -39,112 +92,41 @@ class ActionRegistry:
 
     def _init_action_dict(self):
 
-
-        for sig_type in (   qSignalType.FILTER,
-                            qSignalType.DIFF,
-                            qSignalType.OFFSET,
-                            qSignalType.OFFSET_X,
-                        ):
-
-            # ADD
-            self.register(
-                        ActionModifier.ADD_ACTION,
-                        sig_type,
-                        lambda  sig,
-                                params,
-                                model,
-                                index,
-                                st=sig_type: AddFilterCommand(
-                                                                sig,
-                                                                FilterFactory().create(
-                                                                    {
-                                                                    'type':st.name,
-                                                                    "params": params
-                                                                    }),
-                                                                model,
-                                                                index
-                                                            )
-                        )
-            # REMOVE
-            self.register(
-                        ActionModifier.REMOVE_ACTION,
-                        sig_type,
-                        lambda  sig,
-                                params,
-                                model,
-                                index,
-                                st=sig_type: RemoveFilterCommand(
-                                                                    sig,
-                                                                    model,
-                                                                    index
-                                                                )
-                        )
-            # Modify
-            self.register(
-                        ActionModifier.MODIFY_ACTION,
-                        sig_type,
-                        lambda  sig,
-                                params,
-                                model,
-                                index,
-                                st=sig_type: ModifyFilterCommand(
-                                                                    sig,
-                                                                    params,
-                                                                    model,
-                                                                    index
-                                                                )
-                        )
-
-        for sig_type in (   qSignalType.MODEL,
-                            qSignalType.FFT,
-                            qSignalType.DIFF_EXT
-                        ):
+        for sig_type in (   qSignalType.FILTER, qSignalType.DIFF, qSignalType.OFFSET,
+                            qSignalType.OFFSET_X ):
 
             # ADD
             self.register(
                             ActionModifier.ADD_ACTION,
                             sig_type,
-                            lambda  sig,
-                                    params,
-                                    model,
-                                    index,
-                                    st=sig_type: AddAnalysisCommand(
-                                                                    sig,
-                                                                    AnalysisFactory().create(
-                                                                        {
-                                                                            'type':st.name,
-                                                                            'params':params
-                                                                        }),
-                                                                    model,
-                                                                    index
-                                                                    )
-                        )
-            # REMOVE
+                            AddNodeFactory(sig_type, FilterFactory)
+                            )
             self.register(
                             ActionModifier.REMOVE_ACTION,
                             sig_type,
-                            lambda  sig,
-                                    params,
-                                    model,
-                                    index,
-                                    st=sig_type: RemoveAnalysisCommand(
-                                                                            sig,
-                                                                            model,
-                                                                            index
-                                                                        )
+                            RemoveNodeFactory(True)
                         )
-            # Modify
             self.register(
                             ActionModifier.MODIFY_ACTION,
                             sig_type,
-                            lambda  sig,
-                                    params,
-                                    model,
-                                    index,
-                                    st=sig_type: ModifyAnalysisCommand(
-                                                                            sig,
-                                                                            params,
-                                                                            model,
-                                                                            index
-                                                                        )
+                            ModifyNodeFactory(True)
                         )
+
+        for sig_type in (  qSignalType.MODEL, qSignalType.FFT, qSignalType.DIFF_EXT ):
+            self.register(
+                            ActionModifier.ADD_ACTION,
+                            sig_type,
+                            AddNodeFactory(sig_type, AnalysisFactory)
+                        )
+            self.register(
+                            ActionModifier.REMOVE_ACTION,
+                            sig_type,
+                            RemoveNodeFactory(False)
+                        )
+            self.register(
+                            ActionModifier.MODIFY_ACTION,
+                            sig_type,
+                            ModifyNodeFactory(False)
+                        )
+
+        print(self._factories.items())

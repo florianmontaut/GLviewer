@@ -1,0 +1,119 @@
+
+@startuml
+
+title Command Handling Architecture (Undo/Redo + Analysis/Filter Pipeline)
+
+' =========================
+' === CONTROLLER LAYER ====
+' =========================
+
+class WorkspaceController {
+    - undo_stack : QUndoStack
+    - registry : ActionRegistry
+    + push(signal, ActionRequest)
+}
+
+class ActionRegistry {
+    - factories : dict
+    + execute(signal, request) : Command
+}
+
+' =========================
+' === FACTORIES ===========
+' =========================
+
+interface Factory {
+    + __call__(signal, params, model, index) : Command
+}
+
+class AddAnalysisFactory
+class AddFilterFactory
+class ModifyAnalysisFactory
+class RemoveAnalysisFactory
+
+Factory <|.. AddAnalysisFactory
+Factory <|.. AddFilterFactory
+Factory <|.. ModifyAnalysisFactory
+Factory <|.. RemoveAnalysisFactory
+
+' =========================
+' === COMMANDS ============
+' =========================
+
+abstract class Command {
+    + prepare()
+    + redo()
+    + undo()
+    + error
+}
+
+class AddAnalysisCommand {
+    - analysis_node
+    - derived_signal
+}
+
+class ModifyAnalysisCommand {
+    - old_node
+    - new_node
+    - new_derived
+}
+
+class RemoveAnalysisCommand
+
+Command <|-- AddAnalysisCommand
+Command <|-- ModifyAnalysisCommand
+Command <|-- RemoveAnalysisCommand
+
+' =========================
+' === MODEL LAYER =========
+' =========================
+
+class SignalObject {
+    - pipeline : list<FilterNode>
+    - analyses : list<AnalysisNode>
+    - derived_signals : list<DerivedSignalObject>
+}
+
+class DerivedSignalObject
+
+' =========================
+' === NODES ===============
+' =========================
+
+abstract class AnalysisNode {
+    + compute(signal) : DerivedSignalObject
+}
+
+abstract class FilterNode
+
+class ThermalModelAnalysis
+class FFTAnalysis
+class LowPassFilter
+
+AnalysisNode <|-- ThermalModelAnalysis
+AnalysisNode <|-- FFTAnalysis
+FilterNode <|-- LowPassFilter
+
+' =========================
+' === RELATIONS ===========
+' =========================
+
+WorkspaceController --> ActionRegistry
+ActionRegistry --> Factory
+Factory --> Command
+
+WorkspaceController --> Command : push()
+WorkspaceController --> "QUndoStack"
+
+Command --> SignalObject
+
+AddAnalysisCommand --> AnalysisNode
+AnalysisNode --> DerivedSignalObject
+
+SignalObject --> DerivedSignalObject
+
+ModifyAnalysisCommand --> AnalysisNode
+
+AddFilterFactory --> FilterNode
+
+@enduml
