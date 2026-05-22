@@ -4,7 +4,7 @@
 from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
-from copilot.GLviewer.GLviewer.controller.commands.DependyManager import DependencyManager
+from copilot.GLviewer.GLviewer.controller.commands.dependyManager import DependencyManager
 from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
 from ressources import custom_graph_functions,custom_types,custom_items,custom_menu
 
@@ -61,6 +61,7 @@ class GraphController(QtCore.QObject):
         self.yp_axis                = None
         self._mouse_pos             = 0
         self.dependency_manager     = DependencyManager()
+        self.dependency_manager.thread_controller.result_ready.connect(self.refresh_graph)
 
         # options par défaut de l'objet, le premier init est réalisé
         # par le menu_controller
@@ -154,6 +155,26 @@ class GraphController(QtCore.QObject):
 
     def update_vbox(self):
         self.vb.autoRange()
+
+    #! A implémenter correctement => voir copilot pour la gestion de la MAJ des courbes type derivedSignal
+    
+    def plot_analysis(self, signal):
+
+        for aid in signal.analysis_order:
+
+            analysis = signal.analyses[aid]
+            result = self.dependency_manager.get_result(signal, analysis)
+
+            if result is None:
+                continue  # ou afficher "loading"
+
+            self.plot(result.x, result.y)
+
+
+
+
+
+
 
     # ----------------------------------------------------
     def add_signal_curve(self, sig: SignalObject|DerivedSignalObject):
