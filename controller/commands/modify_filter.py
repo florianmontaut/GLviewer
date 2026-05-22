@@ -32,6 +32,7 @@ class ModifyFilterCommand(ReplayableCommand):
         self.signal.pipeline[self.index] = self.new_node
         self.signal.invalidate()
         # notifier le modèle (TreeView)
+        self.signal.pipeline_version += 1
         self.model.update_filter(self.signal, self.index)
 
     # ------------------------------------------

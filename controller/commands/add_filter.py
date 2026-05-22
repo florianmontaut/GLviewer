@@ -27,8 +27,8 @@ class AddFilterCommand(ReplayableCommand):
         if self.index is None:
             self.index = len(self.signal.pipeline)-1 if len(self.signal.pipeline)>0 else 0
         self.signal.pipeline.insert(self.index, self.filter_node)
-        self.signal.invalidate()
-        
+        #self.signal.invalidate()
+        self.signal.pipeline_version += 1 #! ajouter la même chose dans modify
         # notifier le modèle (TreeView)
         self.model.insert_filter(self.signal, self.filter_node, self.index)
 

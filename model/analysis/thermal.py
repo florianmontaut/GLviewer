@@ -1,5 +1,4 @@
 
-import uuid
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
@@ -89,7 +88,6 @@ class ThermalModelAnalysis(AnalysisNode):
             raise ValueError("Extrapolation time must be >= 0")
         #! ajouter une vérif sur la validité de la plage (start et stop).
 
-        self.id = uuid.uuid4().hex[:8]
         self.t_start = None
         self.t_end = None
         self.results: custom_items.ThermalFitResult | None = None

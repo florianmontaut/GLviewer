@@ -1,4 +1,5 @@
 
+import uuid
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,7 @@ class AnalysisNode(ABC):
 
     def __init__(self, **params):
         # Initialisation des paramètres depuis le schéma
+        self.id = uuid.uuid4().hex
         self.is_selected = False
         self.opts_dict = generate_opts_dict(self.PARAMETER_SCHEMA)
         self._params = {

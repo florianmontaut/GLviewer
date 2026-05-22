@@ -4,6 +4,7 @@
 from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
+from copilot.GLviewer.GLviewer.controller.commands.DependyManager import DependencyManager
 from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
 from ressources import custom_graph_functions,custom_types,custom_items,custom_menu
 
@@ -59,6 +60,7 @@ class GraphController(QtCore.QObject):
         self.xp_axis                = None
         self.yp_axis                = None
         self._mouse_pos             = 0
+        self.dependency_manager     = DependencyManager()
 
         # options par défaut de l'objet, le premier init est réalisé
         # par le menu_controller

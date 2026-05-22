@@ -1,5 +1,4 @@
 
-import uuid
 import numpy as np
 import pyqtgraph as pg
 from scipy.interpolate import interp1d
@@ -38,7 +37,6 @@ class DiffSignalAnalysis(AnalysisNode):
     def validate(self,params):
 
         self._params['reference_file'] = None
-        self.id = uuid.uuid4().hex[:8]
 
         if isinstance(params['reference'], SignalObject):
             self._params['reference_file'] = params['reference'].file.name

@@ -24,9 +24,7 @@ class AddAnalysisCommand(ReplayableCommand):
 
 
     def prepare(self):
-        if self.index is None:
-            self.index = len(self.signal.analyses)
-        self.derived_signal = self.analysis_node.compute(self.signal)
+        pass
 
     def redo(self):
 

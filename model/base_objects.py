@@ -292,11 +292,14 @@ class SignalObject:
         self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
         self.cut_off_freq=0.005
         self.filter_curve=False
-        # pipeline de filtres : liste de FilterNode
-        self.pipeline = []
+        # pipeline de filtres : dictionnaire de FilterNode
+        self.pipeline = {}
+        self.pipeline_order = []
+        self.pipeline_version = 0
 
-        # liste des analyses
-        self.analyses = []
+        # dictionnaire des analyses
+        self.analyses = {}
+        self.analysis_order = []
 
         # liste des modèles/signaux dérivés
         self.derived_signals = []
@@ -304,6 +307,7 @@ class SignalObject:
         # cache interne
         self._cache = None
         self._cache_valid = False
+        
 
     # ---------------- BASIC RAW ACCESS ----------------
 
@@ -327,6 +331,13 @@ class SignalObject:
         """Vraies données brutes."""
         return self.file.get_raw_y(self.name)
 
+
+    def get_filter(self, filter_id):
+        return self.pipeline.get(filter_id)
+
+    def get_analysis(self, analysis_id):
+        return self.analyses.get(analysis_id)
+    
     # ---------------- PIPELINE COMPUTATION ----------------
     def compute(self):
         """Calcule y en appliquant chaque filtre dans l’ordre."""
@@ -372,7 +383,8 @@ class SignalObject:
 
 
     def to_dict(self):
-
+        
+        #! boucle for à adapter pour le passage en dictionnaire
         arg_to_export= ['name','visible','pen','pipeline','analyses','is_reference']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['pipeline']=[node.to_dict() for node in obj_params['pipeline']]
@@ -534,7 +546,16 @@ class Workspace:
 class SelectionContext:
     role:               itemType
     signal:             SignalObject
+    
     filter_index:       Optional[int] = None
     analysis_index:     Optional[int] = None
     derived_index:      Optional[int] = None
     item:               Optional[TreeItem] = None
+    
+    
+    def get_filter(self):
+        return self.signal.pipeline.get(self.filter_index)
+
+    def get_analysis(self):
+        return self.signal.analyses.get(self.analysis_index)
+

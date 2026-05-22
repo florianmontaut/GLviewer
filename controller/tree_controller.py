@@ -153,7 +153,7 @@ class TreeController(QtCore.QObject):
             return SelectionContext(
                 role=role,
                 signal=sig,
-                filter_index=sig.pipeline.index(obj),
+                filter_index=obj.id,
                 item=item
             )
 
@@ -163,7 +163,7 @@ class TreeController(QtCore.QObject):
             return SelectionContext(
                 role=role,
                 signal=sig,
-                analysis_index=sig.analyses.index(obj),
+                analysis_index=obj.id,
                 item=item
             )
 
@@ -171,6 +171,7 @@ class TreeController(QtCore.QObject):
             analysis_item = item.parent
             sig_item = analysis_item.parent
             sig = sig_item.data
+            #!les derivedSignal sont supprimés!
             return SelectionContext(
                 role=role,
                 signal=sig,
