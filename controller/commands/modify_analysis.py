@@ -1,3 +1,5 @@
+from typing import OrderedDict
+
 from ressources.custom_commands import ReplayableCommand
 
 
@@ -14,9 +16,7 @@ class ModifyAnalysisCommand(ReplayableCommand):
         old_node = signal.analyses[index]
         new_node = old_node.clone_with(**new_params)
 
-        super().__init__(
-            f"Modify {old_node.display_name} → {new_node.display_name}"
-        )
+        super().__init__(f"Modify {old_node.display_name} → {new_node.display_name}")
 
         self.signal = signal
         self.index = index
@@ -31,6 +31,7 @@ class ModifyAnalysisCommand(ReplayableCommand):
 
     def redo(self):
         # Sauvegarder les anciens dérivés (lazy)
+        '''
         if self.old_derived is None:
             self.old_derived = [
                                 ds for ds in self.signal.derived_signals
@@ -58,7 +59,27 @@ class ModifyAnalysisCommand(ReplayableCommand):
 
         self.model.update_analysis(self.signal, self.index)
 
+        '''
+        
+        items = list(self.signal.analyses.items())
+
+        old_id, _ = items[self.index]
+
+        new_node = self.new_node
+        new_id = new_node.id
+
+        items[self.index] = (new_id, new_node)
+
+        self.signal.analyses = OrderedDict(items)
+        self.model.update_analysis(self.signal, self.index)
+        
+            
+        
+        
+        
+        
     def undo(self):
+        '''
         self.signal.analyses[self.index] = self.old_node
 
         # Restaurer les anciens dérivés
@@ -69,4 +90,18 @@ class ModifyAnalysisCommand(ReplayableCommand):
 
         self.model.update_analysis(self.signal, self.index)
         
+        '''
+        items = list(self.signal.analyses.items())
+
+        new_id = self.new_node.id
+        idx = next(i for i, (aid, _) in enumerate(items) if aid == new_id)
+
+        old_node = self.old_node
+        old_id = old_node.id
+
+        items[idx] = (old_id, old_node)
+
+        self.signal.analyses = OrderedDict(items)
+
+        self.model.update_analysis(self.signal, self.index)
         

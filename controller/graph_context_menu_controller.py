@@ -16,16 +16,16 @@ class GraphContextMenu(BaseContextMenu):
         super().__init__(menu, action_callback)
 
     def _build_menu(self):
-        isolate  = self._add_action(qSignalType.ISOLATE)
-        ref_     = self._add_action(qSignalType.REF)
-        filter_  = self._add_action(qSignalType.FILTER)
-        delta_   = self._add_action(qSignalType.DIFF)
-        y_offset = self._add_action(qSignalType.OFFSET)
-        model_   = self._add_action(qSignalType.MODEL)
-        text_    = self._add_action(qSignalType.TEXT)
-        delete_  = self._add_action(qSignalType.DEL)
-        start_rec = self._add_action(qSignalType.START)
-        stop_rec  = self._add_action(qSignalType.STOP)
+        isolate     = self._add_action(qSignalType.ISOLATE)
+        ref_        = self._add_action(qSignalType.REF)
+        filter_     = self._add_action(qSignalType.FILTER)
+        delta_      = self._add_action(qSignalType.DIFF)
+        y_offset    = self._add_action(qSignalType.OFFSET)
+        model_      = self._add_action(qSignalType.MODEL)
+        text_       = self._add_action(qSignalType.TEXT)
+        delete_     = self._add_action(qSignalType.DEL)
+        start_rec   = self._add_action(qSignalType.START)
+        stop_rec    = self._add_action(qSignalType.STOP)
 
         view_all = self.menu.actions()[0]
         self.menu.insertActions(   view_all,

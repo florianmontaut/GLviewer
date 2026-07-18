@@ -128,5 +128,3 @@ class ActionRegistry:
                             sig_type,
                             ModifyNodeFactory(False)
                         )
-
-        print(self._factories.items())

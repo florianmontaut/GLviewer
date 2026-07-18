@@ -247,34 +247,6 @@ def apply_options_to_parameters(param_root, opts_dict, saved_options):
                         child.setValue(saved_options[logical_key])
     recurse(param_root)
 
-def dict_to_QPen(data):
-    """
-    Reconstruit un QPen à partir d'un dictionnaire.
-    """
-    def _qt_enum(enum_cls, value):
-        """Méthode nécessaire pour récupérer les QtEnum valables sans messages d'erreur
-
-        Args:
-            enum_cls (Enum): classe de type Enum
-            value (str): clé/nom d'un élément de l'Enum que l'on souhaite récupérer
-
-        Returns:
-            Enum:   renvoi une valeur de l'Enum correspondant à la clé passée en attribut
-                    (Enum.item)
-        """
-        return enum_cls(int(value))
-
-    pen = QtGui.QPen()
-    pen.setStyle(_qt_enum(QtCore.Qt.PenStyle,data["style"]))
-    pen.setColor(QtGui.QColor(data["color"]))
-    pen.setWidthF(data["width"])
-    pen.setDashPattern(data["dash"])
-    pen.setCosmetic(data["cosmetic"])
-    pen.setCapStyle(_qt_enum(QtCore.Qt.PenCapStyle,data["cap"]))
-    pen.setJoinStyle(_qt_enum(QtCore.Qt.PenJoinStyle,data["join"]))
-
-    return pen
-
 
 def dict_to_QPen(data):
     """

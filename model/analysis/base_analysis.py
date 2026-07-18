@@ -1,6 +1,7 @@
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
+import uuid
 
 if TYPE_CHECKING:
     from model.base_objects import SignalObject, DerivedSignalObject
@@ -26,6 +27,7 @@ class AnalysisNode(ABC):
     def __init__(self, **params):
         # Initialisation des paramètres depuis le schéma
         self.is_selected = False
+        self.id = uuid.uuid4().hex
         self.opts_dict = generate_opts_dict(self.PARAMETER_SCHEMA)
         self._params = {
                             spec["key"]: spec["default"]

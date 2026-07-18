@@ -15,11 +15,7 @@ import pyqtgraph as pg
 import pyqtgraph.parametertree.parameterTypes as pTypes
 
 import ressources.modelFunctions as mf
-from .custom_types import modelType
-
-
-import pyqtgraph.parametertree.parameterTypes as pTypes
-from PyQt6.QtWidgets import QApplication
+from ressources.custom_types import modelType
 
 
 class ThermalModelizerParameter(pTypes.GroupParameter):
@@ -95,7 +91,7 @@ class ThermalModelResultParameter(pTypes.GroupParameter):
                 f"Rth={self.analysis.results.R_th}\n"
                 f"Cth={self.analysis.results.C_th}"
             )
-            QApplication.clipboard().setText(text)
+            QtWidgets.QApplication.clipboard().setText(text)
 
     def _update(self):
         self.sigTreeStateChanged.emit(

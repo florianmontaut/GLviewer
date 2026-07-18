@@ -2,7 +2,7 @@
 # controller/tree_controller.py
 
 from PyQt6 import QtCore,QtGui,QtWidgets
-from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
+from model.base_objects import SignalObject,DerivedSignalObject
 
 from model.tree_item import TreeItem
 from model.tree_model import PipelineTreeModel
@@ -11,7 +11,8 @@ from PyQt6.QtWidgets import QTreeView
 from controller.tree_context_menu_controller import TreeContextMenu
 
 from ressources.custom_menu import SelectionState
-from ressources import custom_types,custom_items
+from ressources import custom_types
+from ressources.custom_items import SelectionContext,itemType
 
 class TreeController(QtCore.QObject):
     """
@@ -58,127 +59,85 @@ class TreeController(QtCore.QObject):
         #selection_model.currentChanged.connect(lambda: print("changed!"))
         self.model.dataChanged.connect(self._on_checkbox_changed)
 
-    # ----------------------------------------------------------
-    '''
-    def _resolve_signal_node_index(self, item):
-        """Retourne l'index métier d'un nœud Filter/Analysis pour le Signal associé."""
-        obj = item.data
-        if item.role == custom_items.itemType.FILTER:
-            sig = item.parent.data
-            try:
-                return (None, sig, sig.pipeline.index(obj), None)
-            except ValueError:
-                return (None, sig, None, None)
-
-        if item.role == custom_items.itemType.ANALYSE:
-            sig = item.parent.data
-            print(f"Signal associé à l'analyse : {sig.display_name} / nombre d'analyses : {len(sig.analyses)}")
-            try:
-                return (None, sig, None, sig.analyses.index(obj))
-            except ValueError as e:
-                print(f"Erreur lors de la recherche de l'analyse : {e}")
-                return (None, sig, None, None)
-
-        if item.role == custom_items.itemType.RAW:
-            return (None, obj, None, None)
-
-        return (obj, None, None, None)
-    '''
-    """def _on_selection_changed(self, selected=None, deselected=None):
-        if selected is not None:
-            if not selected.indexes():
-                return
-
-            index = selected.indexes()[0]
-            item = index.internalPointer()
-            obj = item.data
-            print(  f'Item sélectionné: {obj.display_name} / {type(obj)} /'+
-                    f'{isinstance(obj, AnalysisNode)}')
-
-            #result = self._resolve_signal_node_index(item)
-            self.item_selected.emit(item,index)
-            self.checkStates(obj)
-        else:
-            self.checkStates()"""
-
+    #* Nouvelle version 17/07   *#
     def _on_selection_changed(self, selected, deselected):
         if selected is None:
             return
-        if not selected.indexes():
+        indexes = selected.indexes()
+        if not indexes:
             return
-
-        index = selected.indexes()[0]
-        item: TreeItem = index.internalPointer()
-
-        obj=item.data
+        index = indexes[0]
+        item = index.internalPointer()
+        obj=item.obj
         obj.is_selected = True
-
-        ctx = self._build_selection_context(item)
+        if item is None:
+            return
+        ctx = item.to_selection_context()
+        if ctx is None:
+            return
         if deselected is not None or not deselected:
             indexes = deselected.indexes()
             for index in indexes:
                 item: TreeItem = index.internalPointer()
-                obj = item.data
+                obj = item.obj
                 obj.is_selected = False
-        """try:
-            print(  "Tree_controller ligne 123: _on_selection_changed => méthode appelée en cliquant sur un treeItem: \n"+
-                    f'Signal: {ctx.signal.display_name}, role: {ctx.role}, filter index: {ctx.filter_index}'+
-                    f', Analysis index: {ctx.analysis_index}, derived index: {ctx.derived_index}\n')
-        except:
-            print('failed : échec d\'impression de données du CTX (Tree_controller)\n')"""
         self.item_selected.emit(ctx)
-
-
+    #* Nouvelle version 17/07   *#
+    
     def _build_selection_context(self, item: TreeItem) -> SelectionContext:
         role = item.role
-        obj = item.data
+        obj = item.obj
 
 
-        if role == custom_items.itemType.FILE:
+        if role == itemType.FILE:
             return SelectionContext(
-                role=role,
-                signal=obj,
-                item=item
-            )
+                                        role        = role,
+                                        signal      = obj,
+                                        item        = item
+                                    )
 
-        if role == custom_items.itemType.RAW:
+        if role == itemType.RAW:
             return SelectionContext(
-                role=role,
-                signal=obj,
-                item=item
-            )
+                                        role        = role,
+                                        signal      = obj,
+                                        item        = item
+                                    )
 
-        if role == custom_items.itemType.FILTER:
-            sig = item.parent.data
+        if role == itemType.FILTER:
+            sig = item.parent_item.obj
             return SelectionContext(
-                role=role,
-                signal=sig,
-                filter_index=sig.pipeline.index(obj),
-                item=item
-            )
+                                        role            = role,
+                                        signal          = sig,
+                                        filter_id       = obj.id,
+                                        item            = item
+                                    )
 
-        if role == custom_items.itemType.ANALYSE:
-            sig = item.parent.data
+        if role == itemType.ANALYSE:
+            sig = item.parent_item.obj
             #! la modification/update du signal ext plante. 02/05
             return SelectionContext(
-                role=role,
-                signal=sig,
-                analysis_index=sig.analyses.index(obj),
-                item=item
-            )
-
-        if role == custom_items.itemType.DERIVED:
-            analysis_item = item.parent
-            sig_item = analysis_item.parent
-            sig = sig_item.data
+                                        role                = role,
+                                        signal              = sig,
+                                        analysis_id         = obj.id,
+                                        item                = item
+                                    )
+        #! Derived est amené à être supprimé
+        if role == itemType.DERIVED:
+            analysis_item = item.parent_item
+            sig_item = analysis_item.parent_item
+            sig = sig_item.obj
             return SelectionContext(
-                role=role,
-                signal=sig,
-                derived_index=sig.derived_signals.index(obj),
-                item=item
-            )
+                                        role            = role,
+                                        signal          = sig,
+                                        derived_id      = sig.derived_signals.index(obj),
+                                        item            = item
+                                    )
 
         raise RuntimeError(f"Unhandled TreeItem role: {role}")
+
+    
+    def _build_selection_context(self, item: TreeItem):
+        return item.to_selection_context()
 
 
     def find_treeItem(self,sig):
@@ -186,33 +145,33 @@ class TreeController(QtCore.QObject):
         return self.model.find_item(self.model.root,sig)
 
     def select_tree_from_context(self, ctx: SelectionContext):
-        sel_model = self.tree.selectionModel()
-        sig_item = self.find_treeItem(ctx.signal)
+        sel_model   = self.tree.selectionModel()
+        sig_item    = self.find_treeItem(ctx.signal)
         if sig_item is None:
             return
         index = None
-        root_index   = self.model.parent( item = sig_item)
-        parent_index = self.model.index(  sig_item.row(),
-                                        0,
-                                        root_index)
         # ✅ RAW signal
-        if ctx.role == custom_items.itemType.RAW:
+        if ctx.role == itemType.RAW:
             index = self.model.signal_index_map.get(ctx.signal)
 
         # ✅ FILTER
-        elif ctx.role == custom_items.itemType.FILTER:
-            index = self.model.index(ctx.filter_index, 0, parent_index)
+        elif ctx.role == itemType.FILTER:
+            #index = self.model.index_from_item(ctx.get_node())
+            #! risque d'être détruit par l'ajout des dossiers
+            node_item = self.model.find_item(sig_item, ctx.get_node())
+            index = self.model.index_from_item(node_item)
 
         # ✅ ANALYSE
-        elif ctx.role == custom_items.itemType.ANALYSE:
-            analysis_item = sig_item.child(ctx.analysis_index)
-            index = self.model.index(ctx.analysis_index, 0, parent_index)
+        elif ctx.role == itemType.ANALYSE:
+            #! risque d'être détruit par l'ajout des dossiers
+            node_item = self.model.find_item(sig_item, ctx.get_node())
+            index = self.model.index_from_item(node_item)
 
         # ✅ DERIVED
-        elif ctx.role == custom_items.itemType.DERIVED:
+        elif ctx.role == itemType.DERIVED:
             #! on récupère un analyseNode car derivedTreeItem n'existe pas pour l'instant!
             analysis_item = sig_item.child(ctx.derived_index)
-            index = self.model.index(ctx.derived_index, 0, parent_index)
+            index = self.model.index_from_item(ctx.derived_index)
 
         """print(  f'Ligne 217: {index.internalPointer().data.display_name}'+
                 f'{ctx.signal.display_name}')"""
@@ -242,11 +201,6 @@ class TreeController(QtCore.QObject):
                                     QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter
                                 )
         sel_model.blockSignals(False)
-
-
-
-
-
 
     def checkStates(self,selected=None):
         if selected is not None:
@@ -279,7 +233,7 @@ class TreeController(QtCore.QObject):
         #pour récupéère l'objet signalObject, on utilise la méthode '.data'
         index = topLeft
         item = index.internalPointer()
-        obj = item.data
+        obj = item.obj
 
         if isinstance(obj, SignalObject):
             self.visibility_changed.emit(obj)

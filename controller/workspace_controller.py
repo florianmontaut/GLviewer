@@ -3,10 +3,10 @@ from PyQt6 import QtCore,QtWidgets,QtGui
 from controller.commands.action_registery import ActionRegistry
 from controller.commands.macro import Macro,MacroCommand
 from ressources.custom_types import qSignalType, ActionModifier
-from ressources.custom_items import ActionRequest,itemType
+from ressources.custom_items import ActionRequest,itemType,SelectionContext
 from ressources.custom_exceptions import MissingParameters,AnalysisError,InvalidModelFit
 from ressources.custom_dialogs import AnalysisParamsDialog
-from model.base_objects import SignalObject,SelectionContext
+from model.base_objects import SignalObject
 
 class WorkspaceController(QtCore.QObject):
 
@@ -143,7 +143,9 @@ class WorkspaceController(QtCore.QObject):
         finally:
             self.graph_controller.freeze_updates(False)
 
+        
         self.undo_stack.push(cmd)
+        index = cmd.index
         
         if self._macro_buffer is not None:
             self._macro_buffer.append(action_request)
@@ -151,25 +153,19 @@ class WorkspaceController(QtCore.QObject):
         if action_request.action_type in (  qSignalType.MODEL,
                                             qSignalType.FFT,
                                             qSignalType.DIFF_EXT):
-            if action_request.index is None:
-                index = len(sig.analyses)-1
-            else:
-                index= action_request.index
-
-            ctx=SelectionContext(
-                                    role = itemType.ANALYSE,
-                                    signal=sig,
-                                    analysis_index=index
+            #TODO: pourquoi ne pas directement passer le node plutôt que se trainer une solution bancale
+            analysis_id = sig.get_analysis_id_by_index(index)
+            ctx = SelectionContext(
+                                    role        = itemType.ANALYSE,
+                                    signal      = sig,
+                                    analysis_id = analysis_id
                                 )
         else:
-            if action_request.index is None:
-                index = len(sig.pipeline)-1
-            else:
-                index= action_request.index
-            ctx=SelectionContext(
-                                    role = itemType.FILTER,
-                                    signal=sig,
-                                    filter_index=index
+            filter_id = sig.get_filter_id_by_index(index)
+            ctx = SelectionContext(
+                                    role        = itemType.FILTER,
+                                    signal      = sig,
+                                    filter_id   = filter_id
                                 )
         print(f'workspace PUSH: {ctx}')
         self.undo_redo_macro_activated.emit(ctx)
@@ -211,10 +207,10 @@ class WorkspaceController(QtCore.QObject):
                         }
             merged.update(new_params)
             new_request = ActionRequest(
-                                        action_modifier=action_request.action_modifier,
-                                        action_type=action_request.action_type,
-                                        params=merged,
-                                        index=action_request.index
+                                        action_modifier = action_request.action_modifier,
+                                        action_type     = action_request.action_type,
+                                        params          = merged,
+                                        index           = action_request.index
                                     )
             self.push(signal, new_request)
 

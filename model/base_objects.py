@@ -2,13 +2,13 @@
 # model/base_objects.py
 
 from PyQt6 import QtCore, QtGui
+from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
 import json
 
-from dataclasses import dataclass,field
-from typing import Optional
+
 
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
@@ -18,6 +18,8 @@ from ressources import custom_parameters,custom_struct_functions
 from ressources.custom_items import itemType,FileStruct
 from model.tree_item import TreeItem
 
+
+import uuid
 
 
 
@@ -88,6 +90,7 @@ class FileObject:
         self.start_x        :   float
         self.stop_x         :   float
         self.offset         :   int
+        self.id = uuid.uuid4().hex
 
         self.signals = []   # Liste de SignalObject
         self.is_selected = False
@@ -216,9 +219,9 @@ class FileObject:
             # qu'on peut résoudre ces références
             signal_map = { sig.name: sig   for sig in self.signals }
             for sig in self.signals:
-                for filt in sig.pipeline:
-                    if filt.action_type.name == "DIFF":
-                        filt.resolve_reference(signal_map)
+                for filter in sig.pipeline.values(): #! orderedDict
+                    if filter.action_type.name == "DIFF":
+                        filter.resolve_reference(signal_map)
 
 
     def signals_from_dict(self,data, filter_factory,analyses_factory):
@@ -292,12 +295,11 @@ class SignalObject:
         self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
         self.cut_off_freq=0.005
         self.filter_curve=False
-        # pipeline de filtres : liste de FilterNode
-        self.pipeline = []
-
-        # liste des analyses
-        self.analyses = []
-
+        self.id = uuid.uuid4().hex
+        
+        self.pipeline = OrderedDict() # filter_id -> FilterNode
+        self.analyses = OrderedDict() # analysis_id -> AnalysisNode
+        self.pipeline_version = 0
         # liste des modèles/signaux dérivés
         self.derived_signals = []
 
@@ -315,7 +317,7 @@ class SignalObject:
     @property
     def is_modified(self):
         """Le signal a-t-il subit une modification"""
-        return len(self.pipeline)>0
+        return len(self.pipeline.values())>0 #! orderedDict
 
     @property
     def display_name(self):
@@ -335,7 +337,7 @@ class SignalObject:
 
         y = self.raw_y.copy()
         if self.pipeline:
-            for node in self.pipeline:
+            for node in self.pipeline.values(): #! orderedDict
                 y = node.apply(self.x, y)
 
         self._cache = y
@@ -367,16 +369,135 @@ class SignalObject:
                                                                     newParams)'''
 
         for key, value in newParams.items():
-            print(f"Setting {key} to {value}")
+            #print(f"Setting {key} to {value}")
             setattr(self, key, value)
+
+    #### Helpers de recherche par ID et index ####
+    '''
+    def get_filter_by_id(self, filter_id):
+        return self.pipeline.get(filter_id)
+
+    def get_analysis_by_id(self, analysis_id):
+        return self.analyses.get(analysis_id)
+
+    def _get_filter_index(self, filter_id):
+        return list(self.pipeline.keys()).index(filter_id)
+
+    def _get_analysis_index(self, analysis_id):
+        return list(self.analyses.keys()).index(analysis_id)
+
+    def get_node_index(self, filter_id = None, analysis_id = None):
+        if filter_id is None:
+            return self._get_analysis_index(analysis_id)
+        else:
+            return self._get_filter_index(filter_id)
+        
+    def _get_filter_by_index(self, index):
+        return list(self.pipeline.values())[index]
+
+    def _get_analysis_by_index(self, index):
+        return list(self.analyses.values())[index]
+    
+    def get_node_by_index(self, filter_index = None, analysis_index = None):
+        if filter_index is None:
+            return self._get_analysis_by_index(analysis_index)
+        else:
+            return self._get_filter_by_index(filter_index)
+    '''
+    
+# ------------------------------------------------------------------
+    # Filters
+    # ------------------------------------------------------------------
+
+    def get_filter_by_id(self, filter_id):
+        if filter_id is None:
+            return None
+        return self.pipeline.get(filter_id)
+
+    def get_filter_index_by_id(self, filter_id):
+        if filter_id is None:
+            return None
+
+        try:
+            return list(self.pipeline.keys()).index(filter_id)
+        except ValueError:
+            return None
+
+    def get_filter_by_index(self, index):
+        if index is None:
+            return None
+
+        values = list(self.pipeline.values())
+
+        if index < 0 or index >= len(values):
+            return None
+
+        return values[index]
+
+    def get_filter_id_by_index(self, index):
+        if index is None:
+            return None
+
+        keys = list(self.pipeline.keys())
+
+        if index < 0 or index >= len(keys):
+            return None
+
+        return keys[index]
+
+    # ------------------------------------------------------------------
+    # Analyses
+    # ------------------------------------------------------------------
+
+    def get_analysis_by_id(self, analysis_id):
+        if analysis_id is None:
+            return None
+        return self.analyses.get(analysis_id)
+
+    def get_analysis_index_by_id(self, analysis_id):
+        if analysis_id is None:
+            return None
+
+        try:
+            return list(self.analyses.keys()).index(analysis_id)
+        except ValueError:
+            return None
+
+    def get_analysis_by_index(self, index):
+        if index is None:
+            return None
+
+        values = list(self.analyses.values())
+
+        if index < 0 or index >= len(values):
+            return None
+
+        return values[index]
+
+    def get_analysis_id_by_index(self, index):
+        if index is None:
+            return None
+
+        keys = list(self.analyses.keys())
+
+        if index < 0 or index >= len(keys):
+            return None
+
+        return keys[index]
+
+
+
+    #### Helpers de recherche par ID et index ####
 
 
     def to_dict(self):
 
         arg_to_export= ['name','visible','pen','pipeline','analyses','is_reference']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
-        obj_params['pipeline']=[node.to_dict() for node in obj_params['pipeline']]
-        obj_params['analyses']=[node.to_dict() for node in obj_params['analyses']]
+        obj_params['pipeline'] = [(n_id,node.to_dict()) for n_id,node in
+                                    obj_params['pipeline'].items()] 
+        obj_params['analyses'] = [(n_id,node.to_dict()) for n_id,node in 
+                                    obj_params['analyses'].items()] 
         obj_params['pen']=custom_struct_functions.QPen_to_dict(self.pen)
 
         return obj_params
@@ -389,12 +510,13 @@ class SignalObject:
         sig.visible     =   data.get("visible", True)
         sig.pen         =   custom_struct_functions.dict_to_QPen( data.get("pen"))
 
-        for node_data in data.get("pipeline", []):
+        #! Ordered dict n'est pas sérialisable ! 
+        for node_id,node_data in data.get("pipeline", []): 
             node = filter_factory.create(node_data)
-            sig.pipeline.append(node)
-        for node_data in data.get("analyses", []):
-            node = analysis_factory.create(node_data)
-            sig.analyses.append(node)
+            sig.pipeline[node_id]=node 
+        for node_id,node_data in data.get("analyses", []): 
+            node = analysis_factory.create(node_data) 
+            sig.analyses[node_id]=(node) 
         return sig
 
 
@@ -427,6 +549,7 @@ class DerivedSignalObject(SignalObject):
                     pen: pg.mkPen = None,
                     metadata: dict | None = None,
                 ):
+        
         # On NE passe PAS de FileObject
         self.file = parent_signal.file      # uniquement pour cohérence visuelle / hiérarchie
         self.parent_signal = parent_signal
@@ -442,9 +565,9 @@ class DerivedSignalObject(SignalObject):
         self.pen = pen
 
         # Pas de pipeline pour un modèle
-        self.pipeline = []
-        # Pas d’analyses imbriquées
-        self.analyses = []
+        self.pipeline = OrderedDict() #! orderedDict
+        # Pas d’analyses imbriquées 
+        self.analyses = OrderedDict() #! orderedDict
         self.derived_signals = []
 
         self.metadata = metadata or {}
@@ -522,6 +645,7 @@ class Workspace:
         for file_obj in ws.files:
             for sig in file_obj.signals:
                 for analysis in sig.analyses:
+                    #! analysis.id = data["id"] <= il faut recharger l'id sauvegardé
                     if analysis.action_type.name == "DIFF_EXT":
                         ref_file =  [   file for file in ws.files if
                                         file.name == analysis.params['reference_file']][0]
@@ -529,12 +653,3 @@ class Workspace:
 
         return ws
 
-
-@dataclass(frozen=True)
-class SelectionContext:
-    role:               itemType
-    signal:             SignalObject
-    filter_index:       Optional[int] = None
-    analysis_index:     Optional[int] = None
-    derived_index:      Optional[int] = None
-    item:               Optional[TreeItem] = None

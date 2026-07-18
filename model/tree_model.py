@@ -12,17 +12,14 @@ from model.analysis.base_analysis import AnalysisNode
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from model.base_objects import SignalObject
-from ressources.custom_items import itemType
+from ressources.custom_items import itemType,ModelChangeEvent,ActionModifier
 
 PATH=pathlib.Path(__file__).parent.parent
 
 
 class PipelineTreeModel(QAbstractItemModel):
 
-    new_filter          = pyqtSignal(object,object,object)
-    changed_filter      = pyqtSignal(object,object)
-    new_analysis        = pyqtSignal(object,object,object)
-    changed_analysis    = pyqtSignal(object,object)
+    node_event          = pyqtSignal(object)
 
     def __init__(self, workspace: Workspace, parent=None):
         super().__init__(parent)
@@ -45,6 +42,21 @@ class PipelineTreeModel(QAbstractItemModel):
         self.signal_index_map = {}
         # build signals
         self._build_tree()
+
+    
+    def emit_node_event(self, action, item):
+        ctx = item.to_selection_context()
+
+        if ctx is None:
+            return
+
+        self.node_event.emit(
+                                ModelChangeEvent(
+                                    action=action,
+                                    context=ctx
+                                )
+                            )
+
 
 
     def _build_tree(self):
@@ -88,7 +100,7 @@ class PipelineTreeModel(QAbstractItemModel):
         self.signal_index_map[sig] = index
 
 
-        for node in sig.pipeline:
+        for node in sig.pipeline.values():
             filter_item = TreeItem( node,
                                     parent = sig_item,
                                     )
@@ -119,7 +131,7 @@ class PipelineTreeModel(QAbstractItemModel):
         row = None
 
         for i, child in enumerate(root_item.children):
-            if child.data is file_obj:
+            if child.obj is file_obj:
                 row = i
                 break
 
@@ -153,7 +165,7 @@ class PipelineTreeModel(QAbstractItemModel):
             if not index.isValid():
                 return QModelIndex()
             item = index.internalPointer()
-        parent_item = item.parent
+        parent_item = item.parent_item
 
         if parent_item == self.root or parent_item is None:
             return QModelIndex()
@@ -181,6 +193,13 @@ class PipelineTreeModel(QAbstractItemModel):
         return 2
 
 
+    def index_from_item(self, item: TreeItem):
+        if item is None or item.parent_item is None:
+            return QModelIndex()
+
+        return self.createIndex(item.row(), 0, item)
+
+
     # ---------------------- Display ----------------------
     def data(self, index, role):
         if not index.isValid():
@@ -189,7 +208,7 @@ class PipelineTreeModel(QAbstractItemModel):
         #origine=self.sender()
         #print(origine)
         item = index.internalPointer()
-        obj = item.data
+        obj = item.obj
         obj_type : itemType = obj.item_type
         col = index.column()
 
@@ -286,7 +305,7 @@ class PipelineTreeModel(QAbstractItemModel):
             return False
 
         item = index.internalPointer()
-        obj = item.data
+        obj = item.obj
         obj_type = obj.item_type
 
         if obj_type == itemType.RAW and role == Qt.ItemDataRole.CheckStateRole:
@@ -305,13 +324,14 @@ class PipelineTreeModel(QAbstractItemModel):
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
 
-        obj = index.internalPointer().data
+        obj = index.internalPointer().obj
         flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
 
         if isinstance(obj, SignalObject):
             flags |= Qt.ItemFlag.ItemIsUserCheckable
 
         return flags
+
 
     # ---------------------- Update pipeline (undo/redo) ----------------------
 
@@ -320,40 +340,77 @@ class PipelineTreeModel(QAbstractItemModel):
                             index: int)-> QModelIndex | None:
         sig_item = self.find_item(self.root, sig)
 
-        if not sig_item:
+        '''if not sig_item:
             return
-
-        '''parent_index = self.index(  sig_item.row(),
-                                    0,
-                                    self.index(sig_item.parent.row(), 0, QModelIndex()))'''
-        root_index = self.parent( item = sig_item)
-        parent_index =  self.index(sig_item.row(),
-                                    0,
-                                    root_index)
-
+        parent_index =  self.index_from_item(sig_item)
         filter_item = TreeItem(filter_node, parent = sig_item)
 
         self.beginInsertRows(parent_index, index, index)
         sig_item.children.insert(index, filter_item)
         self.endInsertRows()
 
-        self.new_filter.emit(sig_item,index,parent_index)
+        self.new_filter.emit(filter_item.to_selection_context)'''
+
+
+        signal_item = self.find_signal_item(sig)
+
+        if signal_item is None:
+            return
+
+        filter_item = TreeItem(filter_node, parent=signal_item)
+
+        parent_index = self.index_from_item(signal_item)
+        print(f'Ligne 363 TreeModel:{index}')
+        self.beginInsertRows(parent_index, index, index)
+        signal_item.insert_child(index, filter_item)
+        self.endInsertRows()
+
+        self.emit_node_event(ActionModifier.ADD_ACTION, filter_item)
+
+
+    def insert_analysis(self, sig: SignalObject, analysis_node, index: int):
+        """Insère une analyse dans l'arbre."""
+        sig_item = self.find_item(self.root, sig)
+        if not sig_item:
+            return
+        
+        parent_index = self.index_from_item( sig_item)
+        analysis_item = TreeItem(analysis_node, parent = sig_item)
+
+        self.beginInsertRows(parent_index, index, index)
+        sig_item.children.insert(index, analysis_item)
+        self.endInsertRows()
+
+        self.new_analysis.emit(analysis_item.to_selection_context())
 
     def remove_filter(self, sig: SignalObject, index: int):
         sig_item = self.find_item(self.root, sig)
         if not sig_item:
             return
 
-        root_index = self.parent( item = sig_item)
-        parent_index =  self.index(sig_item.row(),
-                                    0,
-                                    root_index)
+        parent_index =  self.index_from_item(sig_item)
 
         self.beginRemoveRows(parent_index, index, index)
         sig_item.children.pop(index)
         self.endRemoveRows()
         self.changed_filter.emit(sig_item,None)
 
+    def remove_analysis(self, sig: SignalObject, index: int):
+        """Supprime une analyse de l'arbre."""
+        sig_item = self.find_item(self.root, sig)
+        if not sig_item:
+            return
+        parent_index =  self.index_from_item(sig_item)
+        self.beginRemoveRows(parent_index, index, index)
+        sig_item.children.pop(index)
+        self.endRemoveRows()
+
+        self.changed_analysis.emit(sig,index)
+        #? seul signal à renvoyer le signal au lieu du sig_item
+        #! il faut supprimer les derived signals associés à cette analyse
+        #! par exemple la courbe associée (graph_controller.add_signal)
+
+    '''
     def update_filter(self, sig: SignalObject, index: int):
         """
         Mise à jour visuelle d'un FilterNode existant.
@@ -369,13 +426,9 @@ class PipelineTreeModel(QAbstractItemModel):
         filter_item = sig_item.child(index)
 
         #  synchronisation explicite avec la source de vérité
-        filter_item.data = sig.pipeline[index]
+        filter_item.obj = sig.get_filter_by_index(index)
 
-
-        root_index = self.parent( item = sig_item)
-        parent_index =  self.index(sig_item.row(),
-                                    0,
-                                    root_index)
+        parent_index =  self.index_from_item(sig_item)
         model_index = self.index(index, 0, parent_index)
 
         self.dataChanged.emit(
@@ -387,46 +440,7 @@ class PipelineTreeModel(QAbstractItemModel):
                                 ]
                             )
         self.changed_filter.emit(sig_item,index)
-
-    def insert_analysis(self, sig: SignalObject, analysis_node, index: int):
-        """Insère une analyse dans l'arbre."""
-        sig_item = self.find_item(self.root, sig)
-        if not sig_item:
-            return
-
-        root_index   = self.parent( item = sig_item)
-        parent_index = self.index(  sig_item.row(),
-                                    0,
-                                    root_index)
-        analysis_item = TreeItem(analysis_node, parent = sig_item)
-
-        self.beginInsertRows(parent_index, index, index)
-        sig_item.children.insert(index, analysis_item)
-        self.endInsertRows()
-
-        self.new_analysis.emit(sig_item,index,parent_index)
-
-    def remove_analysis(self, sig: SignalObject, index: int):
-        """Supprime une analyse de l'arbre."""
-        sig_item = self.find_item(self.root, sig)
-        if not sig_item:
-            return
-
-        root_index = self.parent( item = sig_item)
-        parent_index =  self.index(sig_item.row(),
-                                    0,
-                                    root_index)
-
-        self.beginRemoveRows(parent_index, index, index)
-        sig_item.children.pop(index)
-        self.endRemoveRows()
-
-        self.changed_analysis.emit(sig,index)
-        #? seul signal à renvoyer le signal au lieu du sig_item
-        #! il faut supprimer les derived signals associés à cette analyse
-        #! par exemple la courbe associée (graph_controller.add_signal)
-
-
+        
     def update_analysis(self, sig: SignalObject, index: int):
         """Met à jour l'affichage d'une analyse après modification."""
         #! actuellement si l'utilisateur modifie un analysisNode alors qu'un filternode
@@ -439,29 +453,99 @@ class PipelineTreeModel(QAbstractItemModel):
             return
 
         analysis_item       = sig_item.child(index)
-        analysis_item.data  = sig.analyses[index]
+        analysis_item.obj  = sig.analyses[index]
 
-        root_index = self.parent( item = sig_item)
-        parent_index =  self.index(sig_item.row(),
-                                    0,
-                                    root_index)
-
+        parent_index =  self.index_from_item(sig_item)
         model_index = self.index(index, 0, parent_index)
-
         self.dataChanged.emit(
                                 model_index,
                                 model_index,
                                 [Qt.ItemDataRole.DisplayRole,
                                 Qt.ItemDataRole.DecorationRole]
-                            )
+                            )'''
+        
+
+    def update_node(self, signal, node_id):
+        '''signal_item = self.find_signal_item(signal)
+
+        if signal_item is None:
+            return
+
+        item = self.find_item_by_object_id(node_id, signal_item)
+
+        if item is None:
+            return
+
+        index = self.index_from_item(item)
+
+        if index.isValid():
+            self.dataChanged.emit(  index,
+                                    index,
+                                    [Qt.ItemDataRole.DisplayRole,
+                                    Qt.ItemDataRole.DecorationRole])
+
+        ctx = item.to_selection_context()
+        self.node_changed.emit(ctx)'''
+        signal_item = self.find_signal_item(signal)
+
+        if signal_item is None:
+            return
+        item = self.find_item_by_object_id(node_id, signal_item)
+
+        if item is None:
+            return
+        index = self.index_from_item(item)
+        if index.isValid():
+            self.dataChanged.emit(index, index)
+        self.emit_node_event(ActionModifier.MODIFY_ACTION, item)
+
+
     # ---------------------- Search ----------------------
+
+    
 
     def find_item(self, item: TreeItem, target_obj):
 
-        if item.data is target_obj:
+        if item.obj is target_obj:
             return item
         for child in item.children:
             found = self.find_item(child, target_obj)
             if found:
                 return found
         return None
+
+    def find_item_by_object_id(self, obj_id, root_item=None):
+        if obj_id is None:
+            return None
+
+        if root_item is None:
+            root_item = self.root
+
+        if getattr(root_item.obj, "id", None) == obj_id:
+            return root_item
+
+        for child in root_item.children:
+            found = self.find_item_by_object_id(obj_id, child)
+            if found is not None:
+                return found
+
+        return None
+
+    def find_signal_item(self, signal):
+        return self.find_item_by_object_id(signal.id)
+
+    def find_filter_item(self, signal, filter_id):
+        signal_item = self.find_signal_item(signal)
+
+        if signal_item is None:
+            return None
+
+        return self.find_item_by_object_id(filter_id, signal_item)
+
+    def find_analysis_item(self, signal, analysis_id):
+        signal_item = self.find_signal_item(signal)
+
+        if signal_item is None:
+            return None
+
+        return self.find_item_by_object_id(analysis_id, signal_item)

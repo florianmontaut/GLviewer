@@ -1,3 +1,5 @@
+from typing import OrderedDict
+
 from ressources.custom_commands import ReplayableCommand
 from ressources.custom_items import AddDescriptor
 from ressources.custom_types import ActionModifier
@@ -25,14 +27,14 @@ class AddAnalysisCommand(ReplayableCommand):
 
     def prepare(self):
         if self.index is None:
-            self.index = len(self.signal.analyses)
+            self.index = len(self.signal.analyses.values())
         self.derived_signal = self.analysis_node.compute(self.signal)
 
     def redo(self):
-
+        """
         # Ajouter l'analyse
         self.signal.analyses.insert(self.index, self.analysis_node)
-
+        """
         # Calculer et ajouter le signal dérivé
         '''try:
             self.derived_signal = self.analysis_node.compute(self.signal)
@@ -41,17 +43,26 @@ class AddAnalysisCommand(ReplayableCommand):
         except Exception as e:
             self.signal.analyses.pop(self.index)
             self.error = e
-            return'''
-
-        
-        print('redo continue')
-        # Notifier le modèle (TreeView)
-        self.model.insert_analysis(self.signal, self.analysis_node, self.index)
+            return
+            '''
+        node = self.analysis_node
+        aid = node.id
+    
+        items = list(self.signal.analyses.items())
+    
+        if self.index is None:
+            items.append((aid, node))
+            self.index = len(items) - 1
+        else:
+            items.insert(self.index, (aid, node))
+    
+        self.signal.analyses = OrderedDict(items)
+        self.model.insert_analysis(self.signal, node, self.index)
 
     def undo(self):
-        self.signal.analyses.pop(self.index)
-        if self.derived_signal in self.signal.derived_signals:
-            self.signal.derived_signals.remove(self.derived_signal)
-
+        items = list(self.signal.analyses.items())
+    
+        items.pop(self.index)
+        self.signal.analyses = OrderedDict(items)
         self.model.remove_analysis(self.signal, self.index)
 
