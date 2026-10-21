@@ -1,7 +1,7 @@
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QTreeWidget,QTreeWidgetItem,QTreeWidgetItemIterator
 
-from .custom_types import itemType
+from ressources.custom_types import itemType
 
 
 def search(tree:QTreeWidget,term:str)->list[QTreeWidget]:

@@ -6,7 +6,7 @@ from PyQt6 import QtCore,QtGui
 from PyQt6.QtWidgets import QTreeWidget,QTreeWidgetItem,QMessageBox,QTreeWidgetItemIterator
 
 import pyqtgraph as pg
-from .custom_types import degree,itemType
+from ressources.custom_types import degree,itemType
 
 
 

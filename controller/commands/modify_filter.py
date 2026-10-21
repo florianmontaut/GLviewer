@@ -1,6 +1,6 @@
 
 # controller/commands/modify_filter.py
-from ressources.custom_commands import ReplayableCommand
+from ressources.custom_commands import ReplayableCommand, od_replace
 
 
 class ModifyFilterCommand(ReplayableCommand):
@@ -13,7 +13,10 @@ class ModifyFilterCommand(ReplayableCommand):
         :param new_params: dict des paramètres modifiés
         :param model: PipelineTreeModel
         """
-        old_node = signal.pipeline[index]
+        old_node = signal.get_filter_by_index(index)
+        if old_node is None:
+            raise IndexError(f"No filter at index {index}")
+        # clone_with valide les paramètres : une erreur remonte avant le push
         new_node = old_node.clone_with(**new_params)
 
         super().__init__(
@@ -28,15 +31,14 @@ class ModifyFilterCommand(ReplayableCommand):
         self.new_node = new_node
 
     # ------------------------------------------
-    def redo(self):
-        self.signal.pipeline[self.index] = self.new_node
-        self.signal.invalidate()
+    def _swap(self, old, new):
+        self.signal.pipeline = od_replace(self.signal.pipeline, old.id, new.id, new)
+        self.signal.pipeline_version += 1
         # notifier le modèle (TreeView)
-        self.model.update_filter(self.signal, self.index)
+        self.model.replace_node(self.signal, old, new)
 
-    # ------------------------------------------
+    def redo(self):
+        self._swap(self.old_node, self.new_node)
+
     def undo(self):
-        self.signal.pipeline[self.index] = self.old_node
-        self.signal.invalidate()
-        # notifier le modèle (TreeView)
-        self.model.update_filter(self.signal, self.index)
+        self._swap(self.new_node, self.old_node)

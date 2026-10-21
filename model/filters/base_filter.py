@@ -1,6 +1,7 @@
 # model/filters/base_filter.py
 
 from abc import ABC, abstractmethod
+import uuid
 
 from ressources.custom_types import qSignalType
 from ressources.custom_items import itemType
@@ -24,6 +25,7 @@ class  FilterNode(ABC):
         # récupère que la valeur par défaut du schéma qui passée dans la
         # classe de l'objet !
         self.is_selected = False
+        self.id = uuid.uuid4().hex
         self.opts_dict = generate_opts_dict(self.PARAMETER_SCHEMA)
         self._params = {
                             self.opts_dict[name]: spec["default"] for name,

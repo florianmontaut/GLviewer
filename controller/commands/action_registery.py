@@ -42,7 +42,7 @@ class ModifyNodeFactory:
         
     def __call__(self, sig, params, model, index):
         if self.is_filter :
-            return ModifyFilterCommand(sig, model, index)
+            return ModifyFilterCommand(sig, params, model, index)
         else:
             return ModifyAnalysisCommand(sig, params, model, index)
 
@@ -76,9 +76,8 @@ class ActionRegistry:
     def execute(self,sig, action_request:ActionRequest):
 
         key = (action_request.action_modifier, action_request.action_type)
-        try:
-            factory = self._factories.get(key)
-        except KeyError:
+        factory = self._factories.get(key)
+        if factory is None:
             raise KeyError(
                             f"No action registered for {action_request.action_modifier=}"+
                             f"{action_request.action_type=}"
@@ -92,8 +91,8 @@ class ActionRegistry:
 
     def _init_action_dict(self):
 
-        for sig_type in (   qSignalType.FILTER, qSignalType.DIFF, qSignalType.OFFSET,
-                            qSignalType.OFFSET_X ):
+        for sig_type in (   qSignalType.FILTER, qSignalType.DIFF, qSignalType.AVG,
+                            qSignalType.OFFSET, qSignalType.OFFSET_X ):
 
             # ADD
             self.register(
@@ -128,5 +127,3 @@ class ActionRegistry:
                             sig_type,
                             ModifyNodeFactory(False)
                         )
-
-        print(self._factories.items())

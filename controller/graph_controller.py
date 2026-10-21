@@ -4,7 +4,7 @@
 from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
-from model.base_objects import SignalObject,DerivedSignalObject,SelectionContext
+from model.base_objects import SignalObject,DerivedSignalObject
 from ressources import custom_graph_functions,custom_types,custom_items,custom_menu
 
 from controller.graph_context_menu_controller import GraphContextMenu
@@ -37,7 +37,7 @@ class GraphController(QtCore.QObject):
     - update pipeline (sig.y recalcule automatiquement)
     """
 
-    curve_selected          = QtCore.pyqtSignal(SelectionContext)
+    curve_selected          = QtCore.pyqtSignal(custom_items.SelectionContext)
     reference_requested     = QtCore.pyqtSignal(SignalObject)
     cursor_moved_X          = QtCore.pyqtSignal(float)
     menu_actions_triggered  = QtCore.pyqtSignal(    custom_types.ActionModifier,
@@ -58,7 +58,7 @@ class GraphController(QtCore.QObject):
         self.vcursor                = None
         self.xp_axis                = None
         self.yp_axis                = None
-        self._mouse_pos             = 0
+        self._mouse_pos             = QtCore.QPointF(0,0)
 
         # options par défaut de l'objet, le premier init est réalisé
         # par le menu_controller
@@ -174,15 +174,17 @@ class GraphController(QtCore.QObject):
         self.highlight(sig)
         #print(f'signal: {sig.display_name}')
         if isinstance(sig, DerivedSignalObject):
-            ctx = SelectionContext(
-                                    role=custom_items.itemType.DERIVED,
+            # une courbe dérivée sélectionne l'analyse qui l'a produite (arbre +
+            # paramètres de l'analyse dans le ParameterTree)
+            ctx = custom_items.SelectionContext(
+                                    role=custom_items.itemType.ANALYSE,
                                     signal=sig.parent_signal,
-                                    derived_index=sig.parent_signal.derived_signals.index(sig),
+                                    analysis_id=sig.metadata.get('analysis_id'),
                                     item=None,  # pas de TreeItem ici
                                 )
 
         elif isinstance(sig, SignalObject):
-            ctx = SelectionContext(
+            ctx = custom_items.SelectionContext(
                                     role=custom_items.itemType.RAW,
                                     signal=sig,
                                     item=None,
@@ -203,6 +205,7 @@ class GraphController(QtCore.QObject):
         """Redessine la courbe après pipeline update."""
         if sig not in self.curves:
             return
+        print(sig.pipeline.items())
         curve = self.curves[sig]
         curve.setData(sig.x, sig.y)
         curve.setPen(sig.pen)
@@ -217,7 +220,7 @@ class GraphController(QtCore.QObject):
             self.vb.enableAutoRange(True)
             self.vb.autoRange()
 
-    def select_graph_from_context(self,ctx:SelectionContext):
+    def select_graph_from_context(self,ctx:custom_items.SelectionContext):
 
         self.highlight(ctx.signal)
 
@@ -263,7 +266,7 @@ class GraphController(QtCore.QObject):
 
     def _init_cursor(self):
 
-        self.graph_tree_ctrl=GraphTreeController(self.plot,self.graph_tree,**self.opts)
+        self.graph_tree_ctrl = GraphTreeController(self.plot,self.graph_tree,**self.opts)
         self.proxy = pg.SignalProxy(self.plot.scene().sigMouseMoved,rateLimit = 50,
                                     slot = self._on_mouse_moved)
 

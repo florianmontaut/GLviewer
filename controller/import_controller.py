@@ -495,8 +495,10 @@ class ImportController(QtCore.QObject):
         du channel, on considère que les données sont valides.
         Arguments:
                 data        {pandas.series} signal
-                threshold   {tuple(float,float} seuils à partir des quels les données sont
-                                                considérées comme erronées
+                threshold   {tuple(float,float)|float} seuils à partir des quels les données
+                                                sont considérées comme erronées, dans
+                                                n'importe quel ordre. Une valeur seule
+                                                donne la plage symétrique [-val, val]
                 active       {bool}         l'option de filtrage des signaux est elle active
                 ratio       {float}         ratio des données erronnées sur la totalité des
                                             points à depassser pour déclarer le signal comme
@@ -510,7 +512,11 @@ class ImportController(QtCore.QObject):
             if ratio<0 or ratio>1 :
                 raise ValueError
             data_len=data.size
-            validation_list=data.between(threshold[0],threshold[1])
+            if np.isscalar(threshold):
+                threshold=(-abs(threshold),abs(threshold))
+            #les loaders GL/TXT passent (max,min) : between() exige (min,max)
+            low,high=min(threshold),max(threshold)
+            validation_list=data.between(low,high)
             #retourne l'état de cette comparaison : somme(validation) > seuil = signal OK
             return sum(validation_list)>ratio*data_len
 
@@ -557,8 +563,10 @@ class ImportController(QtCore.QObject):
             while True:
                 try:
                     import_request:custom_items.ImportRequest = self.load_dict[file_type]
-                    file_caracs=import_request.loader(  file_data['address'],
-                                                        file_data['import_params'])
+                    #settings par mot-clé : le 2e argument positionnel d'openCsvFiles
+                    #est mode_etuve
+                    file_caracs=import_request.loader(  fname=file_data['address'],
+                                                        settings=file_data['import_params'])
                     break
                 except custom_exceptions.TxtDelimiterError  as e:
                     QtWidgets.QMessageBox.warning(self,

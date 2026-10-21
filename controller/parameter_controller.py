@@ -5,11 +5,12 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QHeaderView
 from pkg_resources import normalize_path
 from pyqtgraph.parametertree import Parameter, ParameterTree,parameterTypes
-from model.base_objects import SignalObject,FileObject,SelectionContext
+from model.base_objects import SignalObject,FileObject
 from model.filters.base_filter import FilterNode
 from model.analysis.base_analysis import AnalysisNode
 
 from ressources.custom_parameters import *
+from ressources.custom_items import SelectionContext
 
 
 class ParameterController(QObject):
@@ -34,12 +35,12 @@ class ParameterController(QObject):
         Slot appelé lorsque l'utilisateur modifie un paramètre
         dans le ParameterTree.
         """
-        if ctx.filter_index is not None:
-            node :FilterNode = ctx.signal.pipeline[ctx.filter_index]
-        elif ctx.analysis_index is not None:
-            node :AnalysisNode = ctx.signal.analyses[ctx.analysis_index]
+        if ctx.filter_id is not None:
+            node : FilterNode = ctx.get_filter()
+        elif ctx.analysis_id is not None:
+            node : AnalysisNode = ctx.get_analysis()
         else:
-            node :SignalObject = ctx.signal
+            node : SignalObject = ctx.signal
 
         # 1️⃣ Récupérer les nouvelles valeurs depuis le ParameterTree
         new_params = {}
@@ -69,31 +70,29 @@ class ParameterController(QObject):
 
         '''sig: SignalObject|FileObject,
         index: int|None = None,
-        analysis_index: int | None = None'''
+        analysis_id: int | None = None'''
         
         sig = ctx.signal
         #! ajouter la gestion des FileObject içi aussi pour pouvoir éditer les paramètres 
         #! globaux du fichier (ex: sampling_rate)
-        if ctx.analysis_index is not None:
+        node = ctx.get_node()
+        if ctx.analysis_id is not None:
             #? dans ce cas, on veut éditer les paramètres d'une analyse spécifique
-            node = ctx.signal.analyses[ctx.analysis_index]
             if "reference" in node.get_params().keys():
                 ext_file=node.get_param('reference').file
                 available_signals = [ s for s in ext_file.signals if s is not sig]
             else:
                 available_signals = []
-        elif ctx.filter_index is not None:
+        elif ctx.filter_id is not None:
             #? dans ce cas, on veut éditer les paramètres d'un filtre spécifique
-            node = sig.pipeline[ctx.filter_index]
             available_signals = [ s for s in sig.file.signals if s is not sig ]
         else:
             #? dans ce cas, on veut éditer les paramètres du signal lui même
-            node = sig
             available_signals=[]
 
         self.param = self.build_parameter_tree_for_object(node, available_signals)
         self.widget.setParameters(self.param, showTop=True)
-        #print(f'signal: {sig.name} / index {ctx.filter_index} / analysis index {ctx.analysis_index}')
+        #print(f'signal: {sig.name} / index {ctx.filter_id} / analysis index {ctx.analysis_id}')
         self.param.sigTreeStateChanged.connect(
             lambda *_: self._on_param_change(ctx))
 
@@ -129,7 +128,7 @@ class ParameterController(QObject):
             ptype = spec["type"]
             #la valeur actuelle sauvegardée dans le filter node est récupérée içi
             # ---------- GROUP ----------
-            print(param_name,spec)
+            #print(param_name,spec)
             if ptype == "group":
                 # permet de construire récursivement les groupes imbriqués
                 if group_key is not None:

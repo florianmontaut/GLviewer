@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import copy
 from pandas import DataFrame
@@ -5,15 +6,16 @@ from PyQt6.QtWidgets import  QTreeWidgetItem
 from PyQt6 import QtGui,QtCore
 
 from dataclasses import dataclass,field
-
+from typing import Optional
 
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
 
-from .custom_parameters import ComplementaryElements
-from .custom_tree_functions import CustomTreeWidget
-from .custom_types import itemType,qSignalType,ActionModifier,fileType
-
+from ressources.custom_parameters import ComplementaryElements
+from ressources.custom_tree_functions import CustomTreeWidget
+from ressources.custom_types import itemType,qSignalType,ActionModifier,fileType
+#from model.base_objects import SignalObject
+from model.tree_item import TreeItem
 
 @dataclass
 class StandardStruct():
@@ -40,7 +42,8 @@ class FileStruct():
     data            :   DataFrame
 
     def __post_init__(self):
-        self.name : str = self.address[self.address.rfind('/')+1:len(self.address)-4]
+        #os.path gère les séparateurs '/' et '\' sous Windows (et les extensions != 3 lettres)
+        self.name : str = os.path.splitext(os.path.basename(self.address))[0]
         self.start_x : float = 0
         self.stop_x : float = 0
         self.offset : int  = 0
@@ -92,17 +95,130 @@ class ModelStruct(ModifStruct):
 
 
 
+
+
+
+@dataclass(frozen=True)
+class SelectionContext:
+    role:               itemType
+    signal:             object
+    filter_id:          Optional[str] = None
+    analysis_id:        Optional[str] = None
+    item:               Optional[TreeItem] = None
+    
+    
+    def __post_init__(self):
+        if self.filter_id is not None and self.analysis_id is not None:
+            raise ValueError(
+                "SelectionContext cannot reference both filter_id and analysis_id."
+            )
+
+    
+    #! à supprimer
+    '''    
+    derived_index:      Optional[int] = None
+    
+    '''
+    #! à supprimer
+    
+    def get_filter(self):
+        
+        if self.filter_id is None:
+            return None
+        return self.signal.get_filter_by_id(self.filter_id)
+
+    def get_analysis(self):
+        
+        if self.analysis_id is None:
+            return None
+        return self.signal.get_analysis_by_id(self.analysis_id)
+
+    def get_node(self):
+        if self.filter_id is not None:
+            return self.get_filter()
+        if self.analysis_id is not None:
+            return self.get_analysis()
+
+        return self.signal
+    
+    def get_node_index(self):
+        if self.analysis_id is None:
+            return self.signal.get_node_index(filter_id=self.filter_id)
+        elif self.filter_id is None:
+            return self.signal.get_node_index(analysis_id=self.analysis_id)
+        else:
+            return None
+        
+
+    # ------------------------------------------------------------------
+    # Temporary backward compatibility with index-based code
+    # ------------------------------------------------------------------
+
+    @property
+    def filter_index(self):
+        if self.filter_id is None:
+            return None
+        return self.signal.get_filter_index_by_id(self.filter_id)
+
+    @property
+    def analysis_index(self):
+        if self.analysis_id is None:
+            return None
+        return self.signal.get_analysis_index_by_id(self.analysis_id)
+
+    def get_node_index(self):
+        if self.filter_id is not None:
+            return self.filter_index
+
+        if self.analysis_id is not None:
+            return self.analysis_index
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def is_signal(self):
+        return self.filter_id is None and self.analysis_id is None
+
+    @property
+    def is_filter(self):
+        return self.filter_id is not None
+
+    @property
+    def is_analysis(self):
+        return self.analysis_id is not None
+
+
+
+
 @dataclass
 class AddDescriptor:
     action_modifier: ActionModifier
-    action_type: qSignalType
-    params: dict
+    action_type:     qSignalType
+    params:          dict
 
 
 @dataclass
 class ActionRequest(AddDescriptor):
     index: int
     model: object  = field(init=False,default=None)
+
+
+
+@dataclass(frozen=True)
+class ModelChangeEvent:
+    action: ActionModifier
+    context: SelectionContext
+
+
+
+
+
+
+
 
 @dataclass
 class ThermalFitResult:

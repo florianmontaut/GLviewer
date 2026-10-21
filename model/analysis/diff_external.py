@@ -38,7 +38,7 @@ class DiffSignalAnalysis(AnalysisNode):
     def validate(self,params):
 
         self._params['reference_file'] = None
-        self.id = uuid.uuid4().hex[:8]
+        # self.id est attribué par AnalysisNode.__init__ (clé dans signal.analyses)
 
         if isinstance(params['reference'], SignalObject):
             self._params['reference_file'] = params['reference'].file.name

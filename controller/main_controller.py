@@ -8,7 +8,7 @@ import pyqtgraph as pg
 from PyQt6 import QtCore,QtGui
 
 from model.base_objects import (DerivedSignalObject, FileObject, SignalObject,
-                                Workspace,SelectionContext)
+                                Workspace,)
 from model.tree_model import PipelineTreeModel
 
 from controller.tree_controller import TreeController
@@ -22,7 +22,8 @@ from controller.cursor_controller import CursorController
 
 from model.tree_item import TreeItem
 
-from ressources import custom_types,custom_items
+from ressources import custom_types
+from ressources.custom_items import SelectionContext, itemType, ActionRequest
 
 from view.main_window import MainWindow
 
@@ -126,78 +127,85 @@ class MainController(QtCore.QObject):
             - file_obj : FileObject à ajouter
         """
 
-        if self.workspace is None:
-            self.create_workspace()
-        else:
-            #si le fichier est déjà chargé on sort de méthode
-            if file_obj.address in [file.address for file in self.workspace.files]:
-                return
+        #si le fichier est déjà chargé on sort de méthode
+        if file_obj.address in [file.address for file in self.workspace.files]:
+            return
 
         self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
         self.workspace.add_file(file_obj)
 
-        # Construire QAbstractItemModel
         if self.model is None:
-            self.model = PipelineTreeModel(self.workspace)
-            self.model.new_filter.connect(self._on_filter_added)
-            self.model.new_analysis.connect(self._on_analysis_added)
-            self.model.changed_filter.connect(self._on_filter_changed)
-            self.model.changed_analysis.connect(self._on_analyis_changed)
+            # premier fichier : le modèle est construit à partir du workspace
+            self._init_workspace_model()
         else:
             self.model.add_file_subtree(file_obj)
 
-        # Attacher modèle → TreeView
-        self.tree_ctrl.set_model(self.model)
-
-        # PipelineController avec UndoStack
-        self.workspace_ctrl = WorkspaceController(self.model,self.graph_ctrl)
-        # Create undo/redo actions linked to the stack
-        self._init_undo_redo()
-        self._connect_workspace_signals()
-        # Ajouter toutes les courbes au graph
-        for file_obj in self.workspace.files:
-            for sig in file_obj.signals:
-                self.graph_ctrl.add_signal_curve(sig)
-                for analysis in sig.analyses:
-                    derived = analysis.compute(sig)
-                    sig.derived_signals.append(derived)
-                    self.graph_ctrl.add_signal_curve(derived)
+        # Seules les courbes du nouveau fichier sont ajoutées au graph
+        self._add_file_curves(file_obj)
         self.graph_ctrl.update_vbox()
 
 
     def create_workspace(self,workspace:Workspace):
         """
-        Créer un nouveau workspace et l'attacher à tous les contrôleurs.
+        Remplace le workspace courant (chargement d'un projet .json) et l'attache à
+        tous les contrôleurs.
         """
+        # nettoyage du graphique de l'ancien workspace
+        for sig in list(self.graph_ctrl.curves.keys()):
+            self.graph_ctrl.remove_signal_curve(sig)
 
         self.workspace=workspace
-        self.model = PipelineTreeModel(self.workspace)
-        self.model.new_filter.connect(self._on_filter_added)
-        self.model.new_analysis.connect(self._on_analysis_added)
-        self.model.changed_filter.connect(self._on_filter_changed)
-        self.model.changed_analysis.connect(self._on_analyis_changed)
-        self.tree_ctrl.set_model(self.model)
-        self.workspace_ctrl = WorkspaceController(self.model,self.graph_ctrl)
-
-        # Create undo/redo actions linked to the stack
-        self._init_undo_redo()
-        self._connect_workspace_signals()
 
         for file_obj in self.workspace.files:
-            self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
             for sig in file_obj.signals:
-                self.graph_ctrl.add_signal_curve(sig)
-                for analysis in sig.analyses:
+                #! ordered dict
+                for analysis in sig.analyses.values():
                     #! le treeview ne semble pas être mis à jour et l'index de sélection des courbes
                     #! semble être décalé
                     if analysis.action_type.name == "DIFF_EXT":
                         ref_file =  [   file for file in self.workspace.files if
                                         file.name == analysis.get_param('reference_file')][0]
                         analysis.resolve_reference({s.name: s for s in ref_file.signals})
-                    derived = analysis.compute(sig)
-                    sig.derived_signals.append(derived)
-                    self.graph_ctrl.add_signal_curve(derived)
+        # les signaux dérivés sont calculés avant la construction de l'arbre
+        # afin qu'ils y apparaissent sous leur analyse
+        for file_obj in self.workspace.files:
+            self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
+            self._add_file_curves(file_obj)
+
+        self._init_workspace_model()
+        # l'historique undo/redo concerne l'ancien workspace
+        self.workspace_ctrl.undo_stack.clear()
         self.graph_ctrl.update_vbox()
+
+    def _init_workspace_model(self):
+        """
+        Construit le modèle Qt du workspace courant et l'attache au TreeView.
+        Le WorkspaceController (pile undo/redo) n'est créé qu'une seule fois.
+        """
+        self.model = PipelineTreeModel(self.workspace)
+        self.model.node_event.connect(self._on_node_event)
+        self.tree_ctrl.set_model(self.model)
+
+        if self.workspace_ctrl is None:
+            self.workspace_ctrl = WorkspaceController(self.model,self.graph_ctrl)
+            # Create undo/redo actions linked to the stack
+            self._init_undo_redo()
+            self._connect_workspace_signals()
+        else:
+            self.workspace_ctrl.model = self.model
+
+    def _add_file_curves(self, file_obj:FileObject):
+        """
+        Ajoute au graph les courbes d'un fichier et (re)calcule les signaux dérivés
+        de ses analyses.
+        """
+        for sig in file_obj.signals:
+            self.graph_ctrl.add_signal_curve(sig)
+            #! ordered dict
+            for analysis in sig.analyses.values():
+                derived = analysis.compute(sig)
+                sig.derived_signals.append(derived)
+                self.graph_ctrl.add_signal_curve(derived)
 
     # -------------------------------------------------------------------------
     # TREE SIGNALS
@@ -209,6 +217,7 @@ class MainController(QtCore.QObject):
         """
         self.workspace_ctrl.undo_redo_macro_activated.connect(self.select_from_context)
         self.workspace_ctrl.macro_created.connect(self._on_macro_created)
+        self.workspace_ctrl.recording_changed.connect(self._on_recording_changed)
 
     def _connect_tree_signals(self):
         """
@@ -225,17 +234,17 @@ class MainController(QtCore.QObject):
 
     def _get_attached_item(self,signal):
 
-        item_index = self.model.signal_index_map[signal]
+        item_index = self.model.signal_index(signal)
         item = item_index.internalPointer()
         return item
 
     def _select_signal(self,ctx: SelectionContext):
         if ctx.signal is None:
-            obj=ctx.item.data
+            obj=ctx.item.obj
         else:
             obj=ctx.signal
         sel_model = self.view.treefile.selectionModel()
-        index=self.model.signal_index_map[obj]
+        index=self.model.signal_index(obj)
         with QtCore.QSignalBlocker(sel_model):  # ✅ blocage fin et sûr
             sel_model.setCurrentIndex(  index,
                                         QtCore.QItemSelectionModel.
@@ -262,13 +271,65 @@ class MainController(QtCore.QObject):
             file.is_selected = False
             for sig in file.signals:
                 sig.is_selected = False
-                for filt in sig.pipeline:
+                #! ordered dict
+                for filt in sig.pipeline.values():
                     filt.is_selected = False
-                for analysis in sig.analyses:
+                #! ordered dict
+                for analysis in sig.analyses.values():
                     analysis.is_selected = False
                 for derived in sig.derived_signals:
                     derived.is_selected = False
 
+    def _on_node_event(self, event):
+        ctx : SelectionContext = event.context
+
+        if ctx is None:
+            return
+
+        match event.action:
+            case custom_types.ActionModifier.ADD_ACTION:
+                self._on_node_added(ctx)
+
+            case custom_types.ActionModifier.MODIFY_ACTION:
+                self._on_node_changed(ctx)
+
+            case custom_types.ActionModifier.REMOVE_ACTION:
+                self._on_node_removed(ctx)
+
+    
+    def _on_node_added(self, ctx:SelectionContext):
+        if ctx.item is not None:
+            self.tree_ctrl.select_tree_from_context(ctx)
+        self.param_ctrl.load_params(ctx)
+        self._refresh_signal_curves(ctx.signal)
+
+
+    def _on_node_changed(self, ctx:SelectionContext):
+        self.param_ctrl.load_params(ctx)
+        self._refresh_signal_curves(ctx.signal)
+
+
+    def _on_node_removed(self, ctx:SelectionContext):
+        self.param_ctrl.load_params(ctx)
+        self._refresh_signal_curves(ctx.signal)
+
+    def _refresh_signal_curves(self, sig):
+        """
+        Met à jour la courbe d'un signal (pipeline de filtres) et synchronise les
+        courbes de ses signaux dérivés avec sig.derived_signals (ajout / undo /
+        modification d'une analyse).
+        """
+        self.graph_ctrl.update_signal(sig)
+
+        for derived in sig.derived_signals:
+            self.graph_ctrl.add_signal_curve(derived)
+
+        obsolete = [    curve_sig for curve_sig in self.graph_ctrl.curves
+                        if curve_sig.item_type == itemType.DERIVED
+                        and curve_sig.parent_signal is sig
+                        and curve_sig not in sig.derived_signals]
+        for curve_sig in obsolete:
+            self.graph_ctrl.remove_signal_curve(curve_sig)
 
 
     def select_from_context(self, ctx: SelectionContext, source: str = "external"):
@@ -293,6 +354,7 @@ class MainController(QtCore.QObject):
         # 3. Synchronisation TreeView (si nécessaire)
         # --------------------------------------------------
         if source != "tree":
+            print(ctx)
             self.tree_ctrl.select_tree_from_context(ctx)
         # --------------------------------------------------
         # 4. Synchronisation Graph (si nécessaire)
@@ -311,7 +373,7 @@ class MainController(QtCore.QObject):
         #ctx.signal.is_selected = True
 
         match ctx.role:
-            case custom_items.itemType.RAW:
+            case itemType.RAW:
                 self._select_signal(ctx)
 
                 # Chargement des paramètres dans le parameterTree
@@ -319,15 +381,15 @@ class MainController(QtCore.QObject):
             case _:
                 self.param_ctrl.load_params(ctx)
 
-    def _on_visibility_changed(self, signal, index=None):
+    def _on_visibility_changed(self, item, index=None):
         """
         Un filtre ou une analyse a été ajouté(e) ou modifié(e), il faut mettre à jour la
         courbe correspondante.
         """
-        if isinstance(signal,TreeItem):
-            sig=signal.data
+        if isinstance(item,TreeItem):
+            sig=item.obj
         else:
-            sig=signal
+            sig=item
         self.graph_ctrl.update_signal(sig)
         self._on_cursor_moved(self.model.cursor_x)
 
@@ -340,7 +402,7 @@ class MainController(QtCore.QObject):
         if not index.isValid():
             return
         item = index.internalPointer()
-        obj = item.data
+        obj = item.obj
         # Si l'utilisateur a sélectionné un signal ou un filtre,
         # on remonte au FileObject parent
         if isinstance(obj, SignalObject):
@@ -368,7 +430,7 @@ class MainController(QtCore.QObject):
         """
         if not self.workspace.files:
             return
-        index = self.model.index(0, 0)
+        index = self.model.index(0, 0, QtCore.QModelIndex())
         self.view.treefile.setCurrentIndex(index)
 
     # -------------------------------------------------------------------------
@@ -425,7 +487,8 @@ class MainController(QtCore.QObject):
         self.cursor_ctrl.set_snap(enabled)
 
     def _on_cursor_moved(self,x):
-        if self.model is None:
+        # x est None tant que la souris n'a pas survolé le graphique
+        if self.model is None or x is None:
             return
         self.cursor_ctrl.update_x(x)
         # Modèle (pour la colonne "valeur au curseur")
@@ -457,25 +520,27 @@ class MainController(QtCore.QObject):
 
         #TODO: utiliser pleinement le SelectionContext, actuellement le role de l'action
         #TODO: n'est pas utilisé
-        if ctx.filter_index is None and ctx.analysis_index is None:
-            ctx.signal.set_params(new_params)
-            if isinstance(ctx.signal,SignalObject):
-                self.graph_ctrl.update_signal(ctx.signal)
+        sig=ctx.signal
+        if ctx.filter_id is None and ctx.analysis_id is None:
+            sig.set_params(new_params)
+            if isinstance(sig,SignalObject):
+                self.graph_ctrl.update_signal(sig)
             else:
                 #signal est un FileObject, il faut mettre à jour toutes les courbes associées
-                for sig in ctx.signal.signals:
-                    self.graph_ctrl.update_signal(sig)
+                for signal in sig.signals:
+                    self.graph_ctrl.update_signal(signal)
             return
 
-        elif ctx.role == custom_items.itemType.FILTER:
-            action_type=ctx.signal.pipeline[ctx.filter_index].action_type
+        # ActionRequest.index est une POSITION (int) : on la retrouve à partir de l'id
+        elif ctx.role == itemType.FILTER:
+            action_type=sig.get_filter_by_id(ctx.filter_id).action_type
             index=ctx.filter_index
         else:
-            action_type=ctx.signal.analyses[ctx.analysis_index].action_type
+            action_type=sig.get_analysis_by_id(ctx.analysis_id).action_type
             index=ctx.analysis_index
         self.workspace_ctrl.push(
                                 ctx.signal,
-                                custom_items.ActionRequest(
+                                ActionRequest(
                                     action_modifier = custom_types.ActionModifier.MODIFY_ACTION,
                                     action_type = action_type,
                                     params = new_params,
@@ -486,9 +551,9 @@ class MainController(QtCore.QObject):
         # la logique métier du controller de workspace, il suffit juste de rafraîchir la courbe
         '''
         if ctx.filter_index is not None:
-            role=custom_items.itemType.FILTER
+            role=itemType.FILTER
         else:
-            role=custom_items.itemType.ANALYSE
+            role=itemType.ANALYSE
         ctx=SelectionContext(
                                 role=role,
                                 signal=ctx.signal,
@@ -496,76 +561,10 @@ class MainController(QtCore.QObject):
                                 analysis_index=ctx.analysis_index,
                                 item=None
                             )'''
-        self.on_item_selected(ctx)
+        # Pas de on_item_selected(ctx) ici : le node modifié a été remplacé par un clone
+        # (nouvel id), ctx est donc obsolète. La resélection est faite par le
+        # WorkspaceController (undo_redo_macro_activated) et le node_event MODIFY.
 
-
-    def _on_filter_added(self, sig_item, index, parent_index):
-        # retrouver l'index Qt du filtre
-
-        filter_index = self.model.index(index, 0, parent_index)
-        item=filter_index.internalPointer()
-        self.tree_ctrl.expand_and_select(filter_index)
-        self._on_visibility_changed(sig_item,index)
-        ctx=SelectionContext(
-                                role=custom_items.itemType.RAW,
-                                signal=sig_item.data,
-                                filter_index=index,
-                                item=item,  # pas de TreeItem ici
-                            )
-        self.on_item_selected(ctx)
-
-    def _on_analysis_added(self,sig_item,index,parent_index):
-
-
-        obj=sig_item.data
-        derived_sig=obj.derived_signals[index]
-
-        # graphe
-        self.graph_ctrl.add_signal_curve(derived_sig)
-
-        # ✅ récupérer l’index Qt réel
-        analysis_index = self.model.index(index, 0, parent_index)
-
-        # ✅ déléguer sélection au TreeController
-        self.tree_ctrl.expand_and_select(analysis_index)
-        ctx=SelectionContext(
-                                role=custom_items.itemType.DERIVED,
-                                signal=obj,
-                                derived_index=index,
-                                item=None,  # pas de TreeItem ici
-                            )
-        self.on_item_selected(ctx)
-
-    def _on_filter_changed(self, sig_item, index):
-
-        self.tree_ctrl.expand_items()
-        #! voir ligne 522 pour intégrer la nouvelle méthode analysis_index
-        parent_index = self.model.index( sig_item.row(),
-                                        0,
-                                        self.model.index(   sig_item.parent.row(),
-                                                            0,
-                                                            QtCore.QModelIndex())
-                                        )
-        self.tree_ctrl.expand_items(parent_index)
-        self._on_visibility_changed(sig_item,index)
-        # ajout 09/04 afin de mettre à jour le parameter_tree avec les ctrl-z et y:
-        ctx=SelectionContext(
-                                role=custom_items.itemType.FILTER,
-                                signal=sig_item.data,
-                                filter_index=index,
-                                item=None,  # pas de TreeItem ici
-                            )
-        self.on_item_selected(ctx)
-
-    def _on_analyis_changed(self,sig, index):
-        out = None
-        for signal in self.graph_ctrl.curves.keys():
-
-            if signal.item_type == custom_items.itemType.DERIVED:
-                if signal.parent_signal == sig and signal not in sig.derived_signals:
-                    out = signal
-                    break
-        self.graph_ctrl.remove_signal_curve(out)
 
     # -------------------------------------------------------------------------
     # HELPERS
@@ -579,7 +578,7 @@ class MainController(QtCore.QObject):
         if not sel:
             return None
         item = sel[0].internalPointer()
-        obj = item.data
+        obj = item.obj
         if isinstance(obj, SignalObject):
             return obj
         return None
@@ -613,8 +612,8 @@ class MainController(QtCore.QObject):
         # Mise à jour ciblée : tous les signaux peuvent être impactés
         for file in self.workspace.files:
             for s in file.signals:
-                index = self.model.signal_index_map.get(s)
-                if index:
+                index = self.model.signal_index(s)
+                if index.isValid():
                     self.model.dataChanged.emit(
                                                 index,
                                                 index,
@@ -633,7 +632,7 @@ class MainController(QtCore.QObject):
 
     def _isolate_signal(self):
 
-        for signal, index in self.model.signal_index_map.items():
+        for signal, index in self.model.iter_signal_indexes():
             desired_state = (
                             QtCore.Qt.CheckState.Checked.value
                             if signal.is_selected
@@ -663,9 +662,8 @@ class MainController(QtCore.QObject):
             case custom_types.qSignalType.ISOLATE:
                 self._isolate_signal()
             case custom_types.qSignalType.START:
+                # l'état d'enregistrement des menus suit recording_changed
                 self.workspace_ctrl.start_macro_recording()
-                self.tree_ctrl.macro_recording=True
-                self.graph_ctrl.macro_recording=True
                 self.tree_ctrl.checkStates(signal)
                 self.graph_ctrl.on_selection_changed(signal)
             case custom_types.qSignalType.STOP:
@@ -692,7 +690,7 @@ class MainController(QtCore.QObject):
                                                     ajout d'analyse, etc.)
 
         Returns:
-            custom_items.ActionRequest: structure de données contenant toutes les informations
+            ActionRequest: structure de données contenant toutes les informations
             nécessaires à la création d'un Node dans le modèle du pipeline, elle est ensuite
             traitée par le workspace controller pour faire les modifications métier et
             mise à jour de la vue
@@ -711,27 +709,28 @@ class MainController(QtCore.QObject):
                     # si les signaux comparés proviennent de file différentes
                     # ce n'est pas un simple filtre mais une analyse
                     action_type = custom_types.qSignalType.DIFF_EXT
-                    return custom_items.ActionRequest(
-                                                        action_modifier =
-                                                        custom_types.ActionModifier.ADD_ACTION,
-                                                        action_type = action_type,
-                                                        params = params,
-                                                        index = None
-                                                    )
+                    return ActionRequest(
+                                        action_modifier =
+                                        custom_types.ActionModifier.ADD_ACTION,
+                                        action_type = action_type,
+                                        params = params,
+                                        index = None
+                                        )
             #traitement de Filter et diff par le même return
-            return custom_items.ActionRequest(
-                                                action_modifier =
-                                                custom_types.ActionModifier.ADD_ACTION,
-                                                action_type = action_type,
-                                                params = params,
-                                                index = None
-                                                )
+            return ActionRequest(
+                                action_modifier =
+                                custom_types.ActionModifier.ADD_ACTION,
+                                action_type = action_type,
+                                params = params,
+                                index = None
+                                )
         #ajout d'un filterNode ou un analaysisNode
-        return custom_items.ActionRequest(  action_modifier =
-                                            custom_types.ActionModifier.ADD_ACTION,
-                                            action_type = action_type,
-                                            params = {},
-                                            index = None)
+        return ActionRequest(   
+                                action_modifier =
+                                custom_types.ActionModifier.ADD_ACTION,
+                                action_type = action_type,
+                                params = {},
+                                index = None)
 
     def _ask_filter_params(self,action_type,sig:SignalObject)->dict:
         """_summary_
@@ -762,12 +761,12 @@ class MainController(QtCore.QObject):
             case _ :
                 raise AttributeError
 
-    def _on_macro_created(self,macro):
+    def _on_recording_changed(self, is_recording: bool):
+        """L'état d'enregistrement de macro est porté par le WorkspaceController."""
+        self.tree_ctrl.macro_recording  = is_recording
+        self.graph_ctrl.macro_recording = is_recording
 
-        #! en mettant le RAZ dans cette méthode le soft risque de bloquer la création
-        #! des macros dès le premier défaut
-        self.tree_ctrl.macro_recording=False
-        self.graph_ctrl.macro_recording=False
+    def _on_macro_created(self,macro):
 
         self.tree_ctrl.menu.add_macro_action(macro)
         self.graph_ctrl.menu.add_macro_action(macro)

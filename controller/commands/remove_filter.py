@@ -1,6 +1,6 @@
 
 # controller/commands/remove_filter.py
-from ressources.custom_commands import ReplayableCommand
+from ressources.custom_commands import ReplayableCommand, od_insert, od_remove
 
 
 class RemoveFilterCommand(ReplayableCommand):
@@ -12,7 +12,9 @@ class RemoveFilterCommand(ReplayableCommand):
         :param index: index du filtre à supprimer
         :param model: PipelineTreeModel
         """
-        filter_node = signal.pipeline[index]
+        filter_node = signal.get_filter_by_index(index)
+        if filter_node is None:
+            raise IndexError(f"No filter at index {index}")
         super().__init__(f"Remove {filter_node.display_name}")
 
         self.signal = signal
@@ -24,15 +26,15 @@ class RemoveFilterCommand(ReplayableCommand):
 
     # ------------------------------------------
     def redo(self):
-        self.signal.pipeline.pop(self.index)
-        self.signal.invalidate()
+        self.signal.pipeline = od_remove(self.signal.pipeline, self.removed_filter.id)
+        self.signal.pipeline_version += 1
         # notifier le modèle (TreeView)
-        self.model.remove_filter(self.signal, self.index)
+        self.model.remove_node(self.signal, self.removed_filter)
 
     # ------------------------------------------
     def undo(self):
-        self.signal.pipeline.insert(self.index, self.removed_filter)
-        self.signal.invalidate()
+        node = self.removed_filter
+        self.signal.pipeline = od_insert(self.signal.pipeline, self.index, node.id, node)
+        self.signal.pipeline_version += 1
         # notifier le modèle (TreeView)
-        self.model.insert_filter(self.signal,self.removed_filter, self.index)
-
+        self.model.insert_node(self.signal, node)

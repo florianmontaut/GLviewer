@@ -1,16 +1,18 @@
-from ressources.custom_commands import ReplayableCommand
+from ressources.custom_commands import ReplayableCommand, od_insert, od_remove
 
 
 class RemoveAnalysisCommand(ReplayableCommand):
     """Supprime une analyse d'un signal."""
 
-    def __init__(self, signal, model,index):
+    def __init__(self, signal, model, index):
         """
         :param signal: SignalObject
         :param index: index de l'analyse à supprimer
         :param model: PipelineTreeModel
         """
-        analysis_node = signal.analyses[index]
+        analysis_node = signal.get_analysis_by_index(index)
+        if analysis_node is None:
+            raise IndexError(f"No analysis at index {index}")
         super().__init__(f"Remove {analysis_node.display_name}")
 
         self.signal = signal
@@ -27,16 +29,16 @@ class RemoveAnalysisCommand(ReplayableCommand):
                                 ]
 
     def redo(self):
-        self.signal.analyses.pop(self.index)
-
+        self.signal.analyses = od_remove(self.signal.analyses, self.removed_analysis.id)
         # Supprimer les signaux dérivés associés
         for ds in self.removed_derived:
             if ds in self.signal.derived_signals:
                 self.signal.derived_signals.remove(ds)
 
-        self.model.remove_analysis(self.signal, self.index)
+        self.model.remove_node(self.signal, self.removed_analysis)
 
     def undo(self):
-        self.signal.analyses.insert(self.index, self.removed_analysis)
+        node = self.removed_analysis
+        self.signal.analyses = od_insert(self.signal.analyses, self.index, node.id, node)
         self.signal.derived_signals.extend(self.removed_derived)
-        self.model.insert_analysis(self.signal, self.removed_analysis, self.index)
+        self.model.insert_node(self.signal, node)
