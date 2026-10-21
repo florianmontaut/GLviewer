@@ -217,6 +217,7 @@ class MainController(QtCore.QObject):
         """
         self.workspace_ctrl.undo_redo_macro_activated.connect(self.select_from_context)
         self.workspace_ctrl.macro_created.connect(self._on_macro_created)
+        self.workspace_ctrl.recording_changed.connect(self._on_recording_changed)
 
     def _connect_tree_signals(self):
         """
@@ -661,9 +662,8 @@ class MainController(QtCore.QObject):
             case custom_types.qSignalType.ISOLATE:
                 self._isolate_signal()
             case custom_types.qSignalType.START:
+                # l'état d'enregistrement des menus suit recording_changed
                 self.workspace_ctrl.start_macro_recording()
-                self.tree_ctrl.macro_recording=True
-                self.graph_ctrl.macro_recording=True
                 self.tree_ctrl.checkStates(signal)
                 self.graph_ctrl.on_selection_changed(signal)
             case custom_types.qSignalType.STOP:
@@ -761,12 +761,12 @@ class MainController(QtCore.QObject):
             case _ :
                 raise AttributeError
 
-    def _on_macro_created(self,macro):
+    def _on_recording_changed(self, is_recording: bool):
+        """L'état d'enregistrement de macro est porté par le WorkspaceController."""
+        self.tree_ctrl.macro_recording  = is_recording
+        self.graph_ctrl.macro_recording = is_recording
 
-        #! en mettant le RAZ dans cette méthode le soft risque de bloquer la création
-        #! des macros dès le premier défaut
-        self.tree_ctrl.macro_recording=False
-        self.graph_ctrl.macro_recording=False
+    def _on_macro_created(self,macro):
 
         self.tree_ctrl.menu.add_macro_action(macro)
         self.graph_ctrl.menu.add_macro_action(macro)

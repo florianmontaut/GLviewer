@@ -1,7 +1,9 @@
+import dataclasses
+
 from PyQt6 import QtCore,QtWidgets,QtGui
 
 from controller.commands.action_registery import ActionRegistry
-from controller.commands.macro import Macro,MacroCommand
+from controller.commands.macro import Macro
 from ressources.custom_types import qSignalType, ActionModifier
 from ressources.custom_items import ActionRequest,itemType,SelectionContext
 from ressources.custom_exceptions import MissingParameters,AnalysisError,InvalidModelFit
@@ -12,6 +14,8 @@ class WorkspaceController(QtCore.QObject):
 
     undo_redo_macro_activated = QtCore.pyqtSignal(SelectionContext)
     macro_created = QtCore.pyqtSignal(Macro)
+    # source unique de l'état d'enregistrement (menus du tree et du graph)
+    recording_changed = QtCore.pyqtSignal(bool)
 
     def __init__(self, tree_model,graph_ctrl):
         super().__init__()
@@ -35,13 +39,37 @@ class WorkspaceController(QtCore.QObject):
         """
         return  self._macro_buffer is not None
 
-    def start_macro_recording(self):
-        self._macro_buffer = []
+    def start_macro_recording(self) -> bool:
+        """
+        Démarre l'enregistrement d'une macro. Si un enregistrement contenant déjà des
+        actions est en cours, l'utilisateur choisit de le recommencer (RAZ du buffer)
+        ou de le poursuivre.
+        Seul le buffer de la macro est remis à zéro : les actions déjà effectuées
+        restent dans l'historique et peuvent être annulées (Ctrl+Z).
 
-    #TODO proposer de RAZ le buffer si l'utilisateur essaye de lancer un nouvel
-    #TODO enregistrement alors qu'un est déjà en cours
-    #! la méthode macro existe déjà dans le package QUndoStack! =>on y trouve également un clearStack
-    #! un signal indexChanged
+        Returns:
+            bool: True si un nouvel enregistrement (vide) a démarré
+        """
+        if self._macro_buffer:
+            answer = QtWidgets.QMessageBox.question(
+                        None,
+                        "Macro",
+                        f"Un enregistrement est déjà en cours "
+                        f"({len(self._macro_buffer)} action(s) enregistrée(s)).\n"
+                        "Voulez-vous le recommencer ?\n\n"
+                        "Les actions enregistrées seront retirées de la macro, "
+                        "mais restent annulables avec Ctrl+Z.",
+                        QtWidgets.QMessageBox.StandardButton.Yes |
+                        QtWidgets.QMessageBox.StandardButton.No,
+                        QtWidgets.QMessageBox.StandardButton.No
+                    )
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return False
+
+        self._macro_buffer = []
+        self.recording_changed.emit(True)
+        return True
+
     def stop_macro_recording(self):
         name, ok = QtWidgets.QInputDialog.getText(
                                                     None,
@@ -49,6 +77,7 @@ class WorkspaceController(QtCore.QObject):
                                                     "Nom de la macro :"
                                                 )
         if not ok:
+            # l'enregistrement continue
             return None
 
         optimized_actions = self._flatten_macro_actions(self._macro_buffer)
@@ -56,6 +85,7 @@ class WorkspaceController(QtCore.QObject):
         self.macros[name] = macro
         self._macro_buffer = None
 
+        self.recording_changed.emit(False)
         self.macro_created.emit(macro)
 
     #! ne marche pas
@@ -109,12 +139,18 @@ class WorkspaceController(QtCore.QObject):
         return optimized
 
 
-    def push(self,sig,action_request:ActionRequest):
+    def push(self,sig,action_request:ActionRequest) -> bool:
+        """
+        Crée la commande correspondant à action_request et l'empile dans l'undo_stack.
+
+        Returns:
+            bool: True si l'action a été appliquée, False si elle a échoué / été annulée
+        """
         #TODO: utilise l'attribut id des nodes pour les identifier plutôt que par leur position
         #TODO: dans la pile.
 
         if action_request is None:
-            return
+            return False
         action_request.model = self.model
         
         self.graph_controller.freeze_updates(True)
@@ -129,7 +165,7 @@ class WorkspaceController(QtCore.QObject):
 
         except MissingParameters as e:
             self._ask_missing_params(sig, action_request, e.missing)
-            return
+            return False
 
         except (AnalysisError, RuntimeError, ValueError, IndexError, KeyError) as e:
             #! créer une méthode handleError
@@ -140,7 +176,7 @@ class WorkspaceController(QtCore.QObject):
                                             "Action impossible",
                                             f"L'opération a échoué :\n{e}"
                                         )
-            return
+            return False
 
         finally:
             self.graph_controller.freeze_updates(False)
@@ -170,29 +206,46 @@ class WorkspaceController(QtCore.QObject):
                                 )
         print(f'workspace PUSH: {ctx}')
         self.undo_redo_macro_activated.emit(ctx)
+        return True
 
-    def apply_macro(self, macro: Macro|str, signal):
+    def apply_macro(self, macro: Macro|str, signal) -> bool:
+        """
+        Applique une macro à un signal, comme une seule entrée de l'historique.
 
-        commands = []
+        Chaque action passe par push() entre beginMacro()/endMacro() du QUndoStack :
+        elle est construite sur l'état laissé par l'action précédente (index, nodes),
+        puis exécutée immédiatement. Un seul Ctrl+Z annule toute la macro.
+        Si une action échoue, la macro partiellement appliquée est annulée et
+        retirée de l'historique.
+
+        Returns:
+            bool: True si toutes les actions ont été appliquées
+        """
         if isinstance(macro,str):
             macro=self.macros.get(macro,None)
             if macro is None:
                 raise AttributeError
-        for action_request in macro.action_requests:
-            print(f"Applying action: {action_request}")
-            #! la méthode modify utilise les listes pipelines et analyses du modèle pour
-            #! faire les modifications demandées, il faut donc s'assurer que les action_requests
-            #! contiennent des références valides aux objets concernés, ce qui n'est pas le cas
-            #! actuellement car les commandes sont empilées/sérialisées et par conséquent les
-            #! objest signal ne sont pas modifié dans la boucle for or si on sort de la boucle
-            #! for on casse le undo global de la macro, il faudrait donc trouver un moyen de
-            #! faire pointer les action_requests vers les bons objets du modèle avant de
-            #! les appliquer
-            cmd = self.registry.execute(signal, action_request)
-            if cmd:
-                commands.append(cmd)
+        if not macro.action_requests:
+            return True
 
-        self.undo_stack.push(MacroCommand(commands))
+        self.undo_stack.beginMacro(f"Apply macro {macro.name}")
+        success = True
+        for action_request in macro.action_requests:
+            # copie : la macro enregistrée ne doit pas être modifiée par push()
+            request = dataclasses.replace(action_request, params=dict(action_request.params))
+            if not self.push(signal, request):
+                success = False
+                break
+        self.undo_stack.endMacro()
+
+        if not success:
+            # 1) annulation des actions déjà appliquées de la macro
+            self.undo_stack.undo()
+            # 2) suppression de la macro de l'historique : avec Qt6, redo() d'une commande
+            #    obsolète la supprime SANS l'exécuter (même chose pour undo(), d'où l'ordre)
+            self.undo_stack.command(self.undo_stack.index()).setObsolete(True)
+            self.undo_stack.redo()
+        return success
 
     def _ask_missing_params(    self,
                                 signal:         SignalObject,

@@ -50,8 +50,9 @@ class BaseContextMenu(QtCore.QObject):
                                         ),
                     qSignalType.START : ActionSpec(
                                         label="Start macro recording",
-                                        enabled_if= lambda s:   (s.has_selection
-                                                                and not s.is_recording)
+                                        # disponible pendant un enregistrement : propose
+                                        # alors de le recommencer (WorkspaceController)
+                                        enabled_if= lambda s: s.has_selection
                                         ),
                     qSignalType.STOP : ActionSpec(
                                         label="Stop macro recording",
