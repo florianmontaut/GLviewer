@@ -16,7 +16,7 @@ class FFTAnalysis(AnalysisNode):
             "default": "hann",
             "values": ["none", "hann", "hamming"],
             "readonly": False,
-            "key": "FFT_window",
+            "key": "window",
         },
     }
 

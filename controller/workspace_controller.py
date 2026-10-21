@@ -131,7 +131,7 @@ class WorkspaceController(QtCore.QObject):
             self._ask_missing_params(sig, action_request, e.missing)
             return
 
-        except (AnalysisError, RuntimeError, ValueError, IndexError) as e:
+        except (AnalysisError, RuntimeError, ValueError, IndexError, KeyError) as e:
             #! créer une méthode handleError
             # InvalidModelFit, fit scipy non convergent, paramètres invalides,
             # node introuvable...

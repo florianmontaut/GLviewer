@@ -513,17 +513,33 @@ class SignalObject:
         sig.visible     =   data.get("visible", True)
         sig.pen         =   custom_struct_functions.dict_to_QPen( data.get("pen"))
 
-        #! Ordered dict n'est pas sérialisable ! 
+        #! Ordered dict n'est pas sérialisable ! => liste de [id, node_dict]
         # l'id sauvegardé est réattribué au node : clé du dict et node.id doivent coïncider
-        for node_id,node_data in data.get("pipeline", []):
+        for entry in data.get("pipeline", []):
+            node_id, node_data = SignalObject._split_saved_node(entry)
             node = filter_factory.create(node_data)
-            node.id = node_id
-            sig.pipeline[node_id]=node
-        for node_id,node_data in data.get("analyses", []):
+            node.id = node_id or node.id
+            sig.pipeline[node.id]=node
+        for entry in data.get("analyses", []):
+            node_id, node_data = SignalObject._split_saved_node(entry)
+            if not node_data:
+                # anciens projets : une analyse thermique sans résultat était sauvée {}
+                continue
             node = analysis_factory.create(node_data)
-            node.id = node_id
-            sig.analyses[node_id]=node
+            node.id = node_id or node.id
+            sig.analyses[node.id]=node
         return sig
+
+    @staticmethod
+    def _split_saved_node(entry):
+        """
+        Format actuel : [id, {"type":..., "params":...}]
+        Ancien format (projets d'avant les ID) : {"type":..., "params":...}, sans id
+        """
+        if isinstance(entry, dict):
+            return None, entry
+        node_id, node_data = entry
+        return node_id, node_data
 
 
 class DerivedSignalObject(SignalObject):

@@ -218,20 +218,21 @@ class ThermalModelAnalysis(AnalysisNode):
     # --------------------------------------------------
 
     def to_dict(self):
-        if self.results is None:
-            return {}
-
-        return {    
-                    "type":self.item_type.name,
-                    "params":{
-                        "tau"       :    self.results.tau,
-                        "R_th"      :    self.results.R_th,
-                        "C_th"      :    self.results.C_th,
-                        "T0"        :    self.results.T0,
-                        "T_inf"     :    self.results.T_inf,
-                        "rmse"      :    self.results.rmse,
-                        "fit_range" :    (self.t_start, self.t_end)}
-                    }
+        # "type" + "params" (paramètres d'ENTRÉE) : c'est ce qu'attend AnalysisFactory
+        # au rechargement, le fit est ensuite recalculé.
+        data = super().to_dict()
+        # résultats du fit : informatifs (export), ignorés au rechargement
+        if self.results is not None:
+            data["results"] = {
+                                "tau"       :    float(self.results.tau),
+                                "R_th"      :    float(self.results.R_th),
+                                "C_th"      :    float(self.results.C_th),
+                                "T0"        :    float(self.results.T0),
+                                "T_inf"     :    float(self.results.T_inf),
+                                "rmse"      :    float(self.results.rmse),
+                                "fit_range" :    (float(self.t_start), float(self.t_end))
+                                }
+        return data
 
 
 
