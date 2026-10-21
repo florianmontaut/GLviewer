@@ -147,7 +147,6 @@ class GraphController(QtCore.QObject):
         self.curves = {}  # SignalObject → PlotDataItem
 
         self.old_highlight          = None
-        self.old_highlight_width    = 1
         self.reference_sig          = None
         self.macro_recording        = False
         self.vcursor                = None
@@ -321,7 +320,8 @@ class GraphController(QtCore.QObject):
         print(sig.pipeline.items())
         curve = self.curves[sig]
         curve.setData(sig.x, sig.y)
-        curve.setPen(sig.pen)
+        # la courbe sélectionnée reste mise en évidence
+        self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
         curve.setVisible(sig.visible)
         self.update_vbox()
 
@@ -338,38 +338,40 @@ class GraphController(QtCore.QObject):
         self.highlight(ctx.signal)
 
     def highlight(self, sig):
-        """Met en surbrillance le signal sélectionné."""
-        if sig not in self.curves.keys():
+        """
+        Met en surbrillance le signal sélectionné (largeur doublée, au premier plan) et
+        rend son aspect normal à la courbe précédemment mise en évidence.
+        La largeur de référence est toujours celle de sig.pen : pas de calcul à partir
+        de la largeur actuelle de la courbe, qui peut avoir été réappliquée entre-temps
+        (update_signal) ou appartenir à une courbe retirée (signal dérivé recalculé).
+        """
+        old = self.old_highlight
+        if old is not None and old is not sig and old in self.curves:
+            self._apply_curve_pen(old, highlighted=False)
+        self.old_highlight = None
+
+        if sig not in self.curves:
             return
         curve = self.curves[sig]
         self._update_cursor_color(curve)
         self.on_selection_changed(sig)
+        self._apply_curve_pen(sig, highlighted=True)
+        self.old_highlight = sig
 
-        if self.old_highlight != sig:
-            # Highlight the new signal: double its current width (which should match sig.pen.width() if not previously highlighted)
-            double_width = int(curve.opts['pen'].width() * 2)
-            custom_graph_functions.updateCurve(curve, width=double_width, z_val=10)
-
-            # Deselect the old signal
-            if self.old_highlight is not None:
-                old_curve = self.curves[self.old_highlight]
-                current_width = old_curve.opts['pen'].width()
-                expected_doubled_width = 2 * self.old_highlight_width
-
-                if current_width == expected_doubled_width:
-                    # The width was doubled and not changed by the user; revert to original
-                    custom_graph_functions.updateCurve(old_curve, width=self.old_highlight_width)
-                else:
-                    # The width was changed by the user (e.g., via parameter tree); keep the new width but reset highlight properties
-                    # Assuming custom_graph_functions.updateCurve can update z_val without changing width if width is not provided
-                    custom_graph_functions.updateCurve(old_curve, z_val=0)  # Replace 0 with the default z-value if known
-
-            # Update tracking variables
-            self.old_highlight = sig
-            self.old_highlight_width = sig.pen.width()  # Store the original width for the new highlight
+    def _apply_curve_pen(self, sig, highlighted: bool):
+        """Applique sig.pen à sa courbe, avec une largeur doublée si highlighted."""
+        pen = QtGui.QPen(sig.pen)
+        if highlighted:
+            # largeur 0 = trait cosmétique de 1 px
+            pen.setWidthF(max(sig.pen.widthF(), 1.0) * 2)
+        curve = self.curves[sig]
+        curve.setPen(pen)
+        curve.setZValue(10 if highlighted else 0)
 
     def remove_signal_curve(self, signal):
         curve = self.curves.pop(signal, None)
+        if signal is self.old_highlight:
+            self.old_highlight = None
         if curve is not None:
 
             self.plot.removeItem(curve)
