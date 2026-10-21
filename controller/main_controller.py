@@ -476,6 +476,22 @@ class MainController(QtCore.QObject):
                                                 )
         self.graph_ctrl.cursor_moved_X.connect(self._on_cursor_moved)
         self.graph_ctrl.menu_actions_triggered.connect(self._action_concentrator)
+        self.graph_ctrl.range_picker.accepted.connect(self._on_model_range_accepted)
+        self.graph_ctrl.range_picker.cancelled.connect(
+                                                lambda _: self.view.statusBar().clearMessage())
+
+    def _on_model_range_accepted(self, signal, t_start: float, t_end: float):
+        """Plage validée sur le graphique : création du modèle thermique."""
+        self.view.statusBar().clearMessage()
+        self.workspace_ctrl.push(
+                                signal,
+                                ActionRequest(
+                                    action_modifier = custom_types.ActionModifier.ADD_ACTION,
+                                    action_type     = custom_types.qSignalType.MODEL,
+                                    params          = {'model_range': [t_start, t_end]},
+                                    index           = None
+                                    )
+                                )
 
 
     def _connect_cursor_signals(self):
@@ -672,6 +688,11 @@ class MainController(QtCore.QObject):
                 self.graph_ctrl.on_selection_changed(signal)
             case custom_types.qSignalType.MACRO:
                 self.workspace_ctrl.apply_macro(macro_name,signal)
+            case custom_types.qSignalType.MODEL:
+                # la plage des données d'entrée est choisie sur le graphique avant la
+                # création du modèle (voir _on_model_range_accepted)
+                self.graph_ctrl.start_range_selection(signal)
+                self.view.statusBar().showMessage(self.graph_ctrl.range_picker.HINT)
             case _:
                 action_request=self._build_action_request(signal,action_type)
                 self.workspace_ctrl.push(signal,action_request)

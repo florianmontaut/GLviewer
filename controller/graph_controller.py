@@ -28,6 +28,101 @@ class RelativeTimeAxis(pg.DateAxisItem):
         return labels
 
 
+class RangePicker(QtCore.QObject):
+    """
+    Sélection interactive d'une plage temporelle sur le graphique, avant la création
+    d'un modèle : une zone (LinearRegionItem) dont les deux bornes sont déplaçables.
+        - Entrée ou double-clic dans la zone : validation  -> accepted(signal, t_start, t_end)
+        - Échap                               : annulation  -> cancelled(signal)
+    Une seule sélection à la fois : en démarrer une nouvelle annule la précédente.
+    """
+
+    accepted    = QtCore.pyqtSignal(object, float, float)
+    cancelled   = QtCore.pyqtSignal(object)
+
+    HINT = "Placez les bornes du modèle : Entrée ou double-clic pour valider, Échap pour annuler"
+
+    def __init__(self, plot: pg.PlotItem, shortcut_parent: QtWidgets.QWidget):
+        super().__init__()
+        self.plot = plot
+        self.shortcut_parent = shortcut_parent
+        self.region = None
+        self.signal = None
+        self._shortcuts = []
+        self.plot.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+
+    @property
+    def is_active(self) -> bool:
+        return self.region is not None
+
+    def start(self, signal, t_start: float, t_end: float, bounds=None):
+        """Affiche la zone [t_start, t_end] (bornes limitées à bounds=(min,max))."""
+        if self.is_active:
+            self.cancel()
+        self.signal = signal
+        color = signal.pen.color() if signal.pen is not None else QtGui.QColor('r')
+        brush = QtGui.QColor(color)
+        brush.setAlpha(40)
+        self.region = pg.LinearRegionItem(  values      = (t_start, t_end),
+                                            orientation = 'vertical',
+                                            brush       = brush,
+                                            bounds      = bounds,
+                                            swapMode    = 'sort')
+        self.region.setZValue(20)
+        for line in self.region.lines:
+            line.setPen(pg.mkPen(color, width=2))
+            pg.InfLineLabel(line, text='{value:0.0f}s', position=0.95,
+                            color=color, fill=(255,255,255,180))
+        self.plot.addItem(self.region, ignoreBounds=True)
+
+        # raccourcis actifs uniquement pendant la sélection
+        for keys, slot in ( (QtCore.Qt.Key.Key_Return,  self.accept),
+                            (QtCore.Qt.Key.Key_Enter,   self.accept),
+                            (QtCore.Qt.Key.Key_Escape,  self.cancel)):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(keys), self.shortcut_parent)
+            shortcut.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
+            shortcut.activated.connect(slot)
+            self._shortcuts.append(shortcut)
+
+    def current_range(self) -> tuple[float, float]:
+        t_start, t_end = self.region.getRegion()
+        return float(t_start), float(t_end)
+
+    def accept(self):
+        if not self.is_active:
+            return
+        signal = self.signal
+        t_start, t_end = self.current_range()
+        self._stop()
+        self.accepted.emit(signal, t_start, t_end)
+
+    def cancel(self):
+        if not self.is_active:
+            return
+        signal = self.signal
+        self._stop()
+        self.cancelled.emit(signal)
+
+    def _stop(self):
+        for shortcut in self._shortcuts:
+            shortcut.setEnabled(False)
+            shortcut.deleteLater()
+        self._shortcuts = []
+        self.plot.removeItem(self.region)
+        self.region = None
+        self.signal = None
+
+    def _on_mouse_clicked(self, ev):
+        if not self.is_active or not ev.double():
+            return
+        x = self.plot.vb.mapSceneToView(ev.scenePos()).x()
+        t_start, t_end = self.current_range()
+        if t_start <= x <= t_end:
+            ev.accept()
+            # différé : on ne retire pas la zone du graphique pendant son propre événement
+            QtCore.QTimer.singleShot(0, self.accept)
+
+
 class GraphController(QtCore.QObject):
     """
     Gère l'affichage PyQtGraph :
@@ -88,6 +183,8 @@ class GraphController(QtCore.QObject):
         self._init_graph()
         self._init_graph_menu()
         self._init_cursor()
+        # sélection de la plage des données d'entrée d'un modèle
+        self.range_picker = RangePicker(self.plot, self.graph)
 
     @property
     def mouse_pos(self):
@@ -149,6 +246,22 @@ class GraphController(QtCore.QObject):
         self.vb = self.plot.vb
         self.plot.plot()
         self.vb.autoRange()
+
+    def start_range_selection(self, sig: SignalObject):
+        """
+        Affiche la zone de sélection de plage sur le signal sig, pré-placée sur 10 %-90 %
+        de la partie visible du signal et bornée à ses données.
+        """
+        x = sig.x
+        data_min, data_max = float(x[0]), float(x[-1])
+        view_min, view_max = self.vb.viewRange()[0]
+        low, high = max(view_min, data_min), min(view_max, data_max)
+        if high <= low:
+            # signal hors de la vue : on se cale sur l'ensemble du signal
+            low, high = data_min, data_max
+        span = high - low
+        self.range_picker.start(sig, low + 0.1*span, high - 0.1*span,
+                                bounds=(data_min, data_max))
 
     def update_vbox(self):
         self.vb.autoRange()

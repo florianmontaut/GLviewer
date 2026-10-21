@@ -1,7 +1,7 @@
 
 # controller/parameter_controller.py
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QHeaderView
 from pkg_resources import normalize_path
 from pyqtgraph.parametertree import Parameter, ParameterTree,parameterTypes
@@ -29,6 +29,14 @@ class ParameterController(QObject):
         self.widget = param_widget
         self.graph = graph_widget
         self.param = None
+        # connexion du ParameterTree affiché (déconnectée à chaque reconstruction afin
+        # que l'ancien arbre ne puisse plus émettre avec un SelectionContext périmé)
+        self._tree_slot = None
+        # (min, max) des abscisses du signal affiché : position des curseurs d'une plage
+        # non définie (None)
+        self._data_range = None
+        # affichage des curseurs conservé d'un arbre à l'autre (ex: après un recalcul)
+        self._cursors_shown = {}
 
     def _on_param_change(self,ctx:SelectionContext):
         """
@@ -47,9 +55,14 @@ class ParameterController(QObject):
         for name in node.opts_dict.keys():
             try:
                 if isinstance(name,str):
-                    new_params[node.opts_dict[name]] = self.param.child(name).value()
+                    child = self.param.child(name)
                 else:
-                    new_params[node.opts_dict[name]] = self.param.child(*name).value()
+                    child = self.param.child(*name)
+                if isinstance(child, LinkedCursors):
+                    # plage [début, fin] (value() renvoie le détail des curseurs)
+                    new_params[node.opts_dict[name]] = child.positions()
+                else:
+                    new_params[node.opts_dict[name]] = child.value()
             except Exception as e:
                 # Paramètre absent ou non éditable
                 print(f"Erreur lors de la récupération du paramètre '{name}': {e}")
@@ -90,14 +103,62 @@ class ParameterController(QObject):
             #? dans ce cas, on veut éditer les paramètres du signal lui même
             available_signals=[]
 
+        self._clear_param_tree()
+        x = getattr(sig, 'x', None)
+        self._data_range = (float(x[0]), float(x[-1])) if x is not None and len(x) else None
+
         self.param = self.build_parameter_tree_for_object(node, available_signals)
         self.widget.setParameters(self.param, showTop=True)
         #print(f'signal: {sig.name} / index {ctx.filter_id} / analysis index {ctx.analysis_id}')
-        self.param.sigTreeStateChanged.connect(
-            lambda *_: self._on_param_change(ctx))
+        self._tree_slot = lambda param, changes: self._on_tree_changed(ctx, changes)
+        self.param.sigTreeStateChanged.connect(self._tree_slot)
+        for cursors in self._linked_cursors(self.param):
+            # la plage n'est appliquée qu'à la fin du déplacement d'un curseur. Différé :
+            # le recalcul reconstruit l'arbre et retire les curseurs, ce qui ne doit pas
+            # se faire pendant l'événement souris du curseur lui-même
+            cursors.sigRangeCommitted.connect(
+                    lambda _: QTimer.singleShot(0, lambda: self._on_param_change(ctx)))
 
         self.widget.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
 
+
+    @staticmethod
+    def _linked_cursors(param):
+        """LinkedCursors présents dans un arbre de paramètres."""
+        if isinstance(param, LinkedCursors):
+            yield param
+            return
+        for child in param.children():
+            yield from ParameterController._linked_cursors(child)
+
+    def _clear_param_tree(self):
+        """Déconnecte l'arbre affiché et retire ses curseurs du graphique."""
+        if self.param is None:
+            return
+        if self._tree_slot is not None:
+            self.param.sigTreeStateChanged.disconnect(self._tree_slot)
+            self._tree_slot = None
+        for cursors in self._linked_cursors(self.param):
+            self._cursors_shown[cursors.name()] = cursors.param('show cursors').value()
+            cursors.sigRangeCommitted.disconnect()
+            cursors.remove_from_graph()
+
+    def _on_tree_changed(self, ctx: SelectionContext, changes):
+        """
+        Modification dans le ParameterTree. Les changements internes aux curseurs
+        (affichage, déplacement, delta) sont ignorés : la plage est appliquée par
+        sigRangeCommitted, une seule fois en fin de déplacement.
+        """
+        def in_cursors(param):
+            while param is not None:
+                if isinstance(param, LinkedCursors):
+                    return True
+                param = param.parent()
+            return False
+
+        if all(in_cursors(param) for param, _, _ in changes):
+            return
+        self._on_param_change(ctx)
 
     def _on_action_triggered(self,action):
         """
@@ -161,13 +222,18 @@ class ParameterController(QObject):
                 continue
             
             if ptype == "cursors":
-                #! ne marche pas alors que le même paramètre est passé dans 
-                #! graph_option_controller
+                # plage [début, fin] stockée dans le node, à défaut l'ensemble du signal
+                key = obj.opts_dict[param_name if group_key is None
+                                    else group_key + (param_name,)]
+                value = obj.get_param(key) or self._data_range or spec["cursors_setting"]["pos"]
+                cursors_setting = dict(spec["cursors_setting"], pos=list(value))
                 param = LinkedCursors(  name = param_name,
                                         graphWidget = self.graph,
-                                        cursors_setting = spec["cursors_setting"]
+                                        cursors_setting = cursors_setting,
+                                        expanded = spec.get("expanded", False),
+                                        show = self._cursors_shown.get(param_name,
+                                                                    spec.get("visible", False))
                                         )
-                param.setOpts(**spec)
                 children.append(param)
                 continue
             # -------------

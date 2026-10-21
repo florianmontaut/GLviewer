@@ -148,10 +148,22 @@ class LinkedCursors(pTypes.GroupParameter):
     """
     Classe héritant de pyqtgraph.parametertree.parameterTypes. Permet de rapidement créer
     des curseurs graphiques dont la valeur est renvoyée dans un parameterTreeItem
+
+    Options :
+        cursors_setting {dict} -- angle (90 = curseurs verticaux), pos [p1, p2], pen, label...
+        show {bool}            -- curseurs affichés à la création (défaut False)
     """
+    # émis quand l'utilisateur a FINI de modifier les curseurs (relâchement d'un curseur
+    # ou valeur saisie dans un champ) : contrairement à sigTreeStateChanged, il n'est pas
+    # émis à chaque pixel d'un déplacement
+    sigRangeCommitted = QtCore.pyqtSignal(object)
+
     def __init__(self,graphWidget, **opts):
 
-        opts['expanded']=False
+        opts['expanded']=opts.get('expanded', False)
+        show = opts.pop('show', False)
+        # l'orientation est donnée par l'angle des curseurs (et non par le nom du paramètre)
+        self.vertical = opts['cursors_setting']['angle'] == 90
         self.linkedojects=[]
         self.cursors=[]
         self.oldState=[0,0]
@@ -175,10 +187,7 @@ class LinkedCursors(pTypes.GroupParameter):
         pTypes.GroupParameter.__init__(self, **opts)
 
         #création des paramètres :
-        if opts['name']=="Vertical cursors":
-            values=[self.cursors[0].pos().x(),self.cursors[1].pos().x()]
-        else:
-            values=[self.cursors[0].pos().y(),self.cursors[1].pos().y()]
+        values=[self._cursor_value(cursor) for cursor in self.cursors]
 
         params=[
                     {'name':'show cursors', 'type': 'bool','value':False},
@@ -192,6 +201,26 @@ class LinkedCursors(pTypes.GroupParameter):
         self.newLinkedObjects(field=self.param('cursor 1'),item=self.cursors[0])
         self.newLinkedObjects(field=self.param('cursor 2'),item=self.cursors[1])
         self.sigTreeStateChanged.connect(self.updateGraph)
+        for cursor in self.cursors:
+            cursor.sigPositionChangeFinished.connect(
+                                        lambda *_: self.sigRangeCommitted.emit(self))
+        if show:
+            self.param('show cursors').setValue(True)
+
+    def _cursor_value(self, cursor) -> float:
+        """Position utile d'un curseur : x pour un curseur vertical, y sinon."""
+        return cursor.pos().x() if self.vertical else cursor.pos().y()
+
+    def positions(self) -> list[float]:
+        """Positions des deux curseurs, triées : [début, fin]."""
+        return sorted([ float(self.param('cursor 1').value()),
+                        float(self.param('cursor 2').value())])
+
+    def remove_from_graph(self):
+        """Retire les curseurs du graphique (ex: ParameterTree reconstruit)."""
+        for cursor in self.cursors:
+            if cursor.scene() is not None:
+                self.graph.removeItem(cursor)
 
     @property
     def display_name(self) -> str:
@@ -262,6 +291,9 @@ class LinkedCursors(pTypes.GroupParameter):
             if field.value() !=item.pos():
                 item.setPos(field.value())
                 self.updateDelta()
+                # valeur saisie par l'utilisateur (le déplacement d'un curseur bloque
+                # cette méthode, voir item_Changed)
+                self.sigRangeCommitted.emit(self)
 
         #lambda est nécessaire pour affecter une fonction à l'élément [id][0] de linkedojects.
         #Si field_Changed(field,item) était directement passé, un message d'erreur NoneType
@@ -281,10 +313,7 @@ class LinkedCursors(pTypes.GroupParameter):
                                             d'éviter une boucle infinie
             """
             if item.pos() !=field.value():
-                if self.opts['name']=="Vertical cursors":
-                    val=item.pos().x()
-                else:
-                    val=item.pos().y()
+                val=self._cursor_value(item)
                 field.setValue(val, blockSignal=self.linkedojects[index][0])
                 self.updateDelta()
 

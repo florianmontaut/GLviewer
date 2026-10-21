@@ -38,14 +38,19 @@ class ThermalModelAnalysis(AnalysisNode):
         "Projection duration (s)": {
                         "type": "float",
                         "default": 0.0,
+                        "limits": (0, None),
+                        "suffix": "s",
                         "key": "projection_duration",
-                        "description": "Durée supplémentaire pour projeter"+
-                                        "la courbe après la fin du signal"
+                        "description": "Durée de la courbe modèle après la fin de la plage "+
+                                        "de fit (0 = automatique : 3 tau)"
                         },
+        # [t_start, t_end] des données d'entrée du modèle (None = tout l'enregistrement).
+        # Définie à la création par la sélection de plage du graphique, puis éditable
+        # avec les curseurs du ParameterTree.
         'Model definition range':{
                         "type": "cursors",
                         "visible":True,
-                        "default": [0,1200],
+                        "default": None,
                         "expanded" : True,
                         "cursors_setting":{
                                 'angle':90,
@@ -87,10 +92,17 @@ class ThermalModelAnalysis(AnalysisNode):
     def validate(self, params):
         if params['projection_duration'] < 0:
             raise ValueError("Extrapolation time must be >= 0")
-        #! ajouter une vérif sur la validité de la plage (start et stop).
+
+        model_range = params['model_range']
+        if model_range is not None:
+            if len(model_range) != 2:
+                raise ValueError("Model range must be [t_start, t_end]")
+            if float(model_range[1]) <= float(model_range[0]):
+                raise ValueError("Model range: t_end must be greater than t_start")
 
         # self.id est attribué par AnalysisNode.__init__ : il sert de clé dans
         # signal.analyses et ne doit pas changer à chaque validation
+        # t_start / t_end : plage EFFECTIVE du dernier fit (model_range bornée aux données)
         self.t_start = None
         self.t_end = None
         self.results: custom_items.ThermalFitResult | None = None
@@ -158,9 +170,6 @@ class ThermalModelAnalysis(AnalysisNode):
 
         # --- Erreur ---
         y_pred = thermal_step(x_fit, *params)
-        print(f'max de y_fit:{max(abs(y_fit))} vs T_inf calculée: {T_inf}')
-        print(f'max de x_fit:{x_fit[-1]} vs tau calculé: {tau}')
-
 
         if abs(T_inf) > 15 * max(abs(y_fit)):
             raise InvalidModelFit(
@@ -202,8 +211,12 @@ class ThermalModelAnalysis(AnalysisNode):
         T_inf = self.results.T_inf
 
         t_end = self._x_fitted[-1]
-        #on utilisera une projection à 3 Tau (soit 95% de la valeur finale)
-        projection = max(t_end * 3, t_end + 3 * tau)
+        projection_duration = self.get_param('projection_duration')
+        if projection_duration > 0:
+            projection = t_end + projection_duration
+        else:
+            #on utilisera une projection à 3 Tau (soit 95% de la valeur finale)
+            projection = max(t_end * 3, t_end + 3 * tau)
 
         t_model = np.linspace(0, projection, 500)
         y_model = thermal_step(t_model, T_inf, tau, T0)
@@ -216,6 +229,20 @@ class ThermalModelAnalysis(AnalysisNode):
     # --------------------------------------------------
     # Export / sérialisation
     # --------------------------------------------------
+
+    @staticmethod
+    def upgrade_params(params: dict) -> dict:
+        """
+        Paramètres d'un projet sauvegardé -> paramètres actuels (appelé par AnalysisFactory
+        au rechargement). Avant la prise en compte des bornes, model_range valait le défaut
+        [0, 1200] ou le dict des curseurs, sans jamais être appliqué : le fit était fait sur
+        tout l'enregistrement, ce que l'on conserve (None).
+        """
+        params = dict(params)
+        model_range = params.get('model_range')
+        if isinstance(model_range, dict) or model_range == [0, 1200]:
+            params['model_range'] = None
+        return params
 
     def to_dict(self):
         # "type" + "params" (paramètres d'ENTRÉE) : c'est ce qu'attend AnalysisFactory
@@ -244,10 +271,16 @@ class ThermalModelAnalysis(AnalysisNode):
         x = parent_signal.x
         y = parent_signal.y
 
-        if self.t_start is None:
-            self.t_start = x[0]
-        if self.t_end is None:
-            self.t_end = x[-1]
+        # plage de fit : model_range bornée aux données, tout l'enregistrement par défaut
+        model_range = self.get_param('model_range')
+        if model_range is None:
+            self.set_fit_range(float(x[0]), float(x[-1]))
+        else:
+            t_start = max(float(model_range[0]), float(x[0]))
+            t_end   = min(float(model_range[1]), float(x[-1]))
+            if t_end <= t_start:
+                raise RuntimeError("Model range does not overlap the signal")
+            self.set_fit_range(t_start, t_end)
         self.results=self.run(x,y,self.get_param('power'))
 
         x_model, y_model = self.generate_model_curve()

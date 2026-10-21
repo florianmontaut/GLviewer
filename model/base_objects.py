@@ -525,7 +525,7 @@ class SignalObject:
             if not node_data:
                 # anciens projets : une analyse thermique sans résultat était sauvée {}
                 continue
-            node = analysis_factory.create(node_data)
+            node = analysis_factory.create_saved(node_data)
             node.id = node_id or node.id
             sig.analyses[node.id]=node
         return sig
