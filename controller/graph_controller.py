@@ -174,10 +174,12 @@ class GraphController(QtCore.QObject):
         self.highlight(sig)
         #print(f'signal: {sig.display_name}')
         if isinstance(sig, DerivedSignalObject):
+            # une courbe dérivée sélectionne l'analyse qui l'a produite (arbre +
+            # paramètres de l'analyse dans le ParameterTree)
             ctx = custom_items.SelectionContext(
-                                    role=custom_items.itemType.DERIVED,
+                                    role=custom_items.itemType.ANALYSE,
                                     signal=sig.parent_signal,
-                                    derived_index=sig.parent_signal.derived_signals.index(sig),
+                                    analysis_id=sig.metadata.get('analysis_id'),
                                     item=None,  # pas de TreeItem ici
                                 )
 

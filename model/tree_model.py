@@ -39,7 +39,8 @@ class PipelineTreeModel(QAbstractItemModel):
 
         # ✅ index par fichier
         self.cursor_Y_values_by_file = {}  # FileObject → list[float]
-        self.signal_index_map = {}
+        # pas de cache des QModelIndex des signaux (cf. signal_index) : Qt recommande
+        # de ne pas conserver un QModelIndex, l'arbre est la seule source de vérité
         # build signals
         self._build_tree()
 
@@ -94,10 +95,6 @@ class PipelineTreeModel(QAbstractItemModel):
     def add_signal_subtree(self, sig: SignalObject, parent:TreeItem):
         sig_item = TreeItem(sig, parent = parent)
         parent.add_child(sig_item)
-
-        # ✅ on mémorise l'index
-        index = self.createIndex(len(parent.children)-1,0,sig_item)
-        self.signal_index_map[sig] = index
 
 
         for node in sig.pipeline.values():
@@ -450,6 +447,23 @@ class PipelineTreeModel(QAbstractItemModel):
 
     def find_signal_item(self, signal):
         return self.find_item_by_object_id(signal.id)
+
+    def signal_index(self, signal) -> QModelIndex:
+        """
+        Index Qt (colonne 0) d'un signal, calculé à la demande : toujours cohérent
+        avec l'arbre (fichiers supprimés, rechargement...). QModelIndex() invalide
+        si le signal n'est pas (ou plus) dans l'arbre.
+        """
+        item = self.find_signal_item(signal)
+        if item is None:
+            return QModelIndex()
+        return self.index_from_item(item)
+
+    def iter_signal_indexes(self):
+        """(SignalObject, QModelIndex) des signaux bruts présents dans l'arbre."""
+        for file_item in self.root.children:
+            for sig_item in file_item.children:
+                yield sig_item.obj, self.index_from_item(sig_item)
 
     def find_filter_item(self, signal, filter_id):
         signal_item = self.find_signal_item(signal)

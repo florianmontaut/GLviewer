@@ -152,7 +152,7 @@ class TreeController(QtCore.QObject):
         index = None
         # ✅ RAW signal
         if ctx.role == itemType.RAW:
-            index = self.model.signal_index_map.get(ctx.signal)
+            index = self.model.signal_index(ctx.signal)
 
         # ✅ FILTER
         elif ctx.role == itemType.FILTER:
@@ -169,9 +169,9 @@ class TreeController(QtCore.QObject):
 
         # ✅ DERIVED
         elif ctx.role == itemType.DERIVED:
-            #! on récupère un analyseNode car derivedTreeItem n'existe pas pour l'instant!
-            analysis_item = sig_item.child(ctx.derived_index)
-            index = self.model.index_from_item(ctx.derived_index)
+            # le SelectionContext ne porte plus d'index de signal dérivé : seul un
+            # contexte construit depuis l'arbre (ctx.item) peut être resélectionné
+            index = self.model.index_from_item(ctx.item) if ctx.item else None
 
         """print(  f'Ligne 217: {index.internalPointer().data.display_name}'+
                 f'{ctx.signal.display_name}')"""

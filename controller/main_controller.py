@@ -234,7 +234,7 @@ class MainController(QtCore.QObject):
 
     def _get_attached_item(self,signal):
 
-        item_index = self.model.signal_index_map[signal]
+        item_index = self.model.signal_index(signal)
         item = item_index.internalPointer()
         return item
 
@@ -244,7 +244,7 @@ class MainController(QtCore.QObject):
         else:
             obj=ctx.signal
         sel_model = self.view.treefile.selectionModel()
-        index=self.model.signal_index_map[obj]
+        index=self.model.signal_index(obj)
         with QtCore.QSignalBlocker(sel_model):  # ✅ blocage fin et sûr
             sel_model.setCurrentIndex(  index,
                                         QtCore.QItemSelectionModel.
@@ -430,7 +430,7 @@ class MainController(QtCore.QObject):
         """
         if not self.workspace.files:
             return
-        index = self.model.index(0, 0)
+        index = self.model.index(0, 0, QtCore.QModelIndex())
         self.view.treefile.setCurrentIndex(index)
 
     # -------------------------------------------------------------------------
@@ -612,8 +612,8 @@ class MainController(QtCore.QObject):
         # Mise à jour ciblée : tous les signaux peuvent être impactés
         for file in self.workspace.files:
             for s in file.signals:
-                index = self.model.signal_index_map.get(s)
-                if index:
+                index = self.model.signal_index(s)
+                if index.isValid():
                     self.model.dataChanged.emit(
                                                 index,
                                                 index,
@@ -632,7 +632,7 @@ class MainController(QtCore.QObject):
 
     def _isolate_signal(self):
 
-        for signal, index in self.model.signal_index_map.items():
+        for signal, index in self.model.iter_signal_indexes():
             desired_state = (
                             QtCore.Qt.CheckState.Checked.value
                             if signal.is_selected
