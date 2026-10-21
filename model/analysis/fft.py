@@ -55,6 +55,6 @@ class FFTAnalysis(AnalysisNode):
             x=freq_pos,
             y=magnitude,
             pen=pen,
-            metadata={"fs": fs, "window": self.get_param('window')}
+            metadata={"fs": fs, "window": self.get_param('window'), "analysis_id": self.id}
         )
         return derived_signal

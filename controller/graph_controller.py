@@ -58,7 +58,7 @@ class GraphController(QtCore.QObject):
         self.vcursor                = None
         self.xp_axis                = None
         self.yp_axis                = None
-        self._mouse_pos             = 0
+        self._mouse_pos             = QtCore.QPointF(0,0)
 
         # options par défaut de l'objet, le premier init est réalisé
         # par le menu_controller

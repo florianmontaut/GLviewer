@@ -107,19 +107,9 @@ class PipelineTreeModel(QAbstractItemModel):
             sig_item.add_child(filter_item)
 
         # --- Analyses ---
-        for analysis in sig.analyses:
-            analysis_item = TreeItem(   analysis,
-                                        parent = sig_item,
-                                    )
-            sig_item.add_child(analysis_item)
-            # Ajouter les signaux DÉRIVÉS de cette analyse
-            for derived_sig in sig.derived_signals:
-                if (hasattr(derived_sig, 'metadata') and
-                    derived_sig.metadata.get('analysis_id') == analysis.id):
-                    derived_item = TreeItem(derived_sig,
-                                            parent = analysis_item,
-                                            )
-                    analysis_item.add_child(derived_item)
+        for analysis in sig.analyses.values(): #! orderedDict
+            # l'analyse et ses signaux DÉRIVÉS
+            sig_item.add_child(self._make_node_item(sig, analysis, sig_item))
 
     def remove_file_subtree(self, file_obj):
         """
@@ -334,169 +324,96 @@ class PipelineTreeModel(QAbstractItemModel):
 
 
     # ---------------------- Update pipeline (undo/redo) ----------------------
+    # Les enfants d'un signal sont ordonnés : les filtres (ordre de sig.pipeline)
+    # PUIS les analyses (ordre de sig.analyses). La ligne d'un node dans l'arbre est
+    # donc calculée à partir du signal (source de vérité) et de l'id du node, jamais
+    # à partir de l'index transmis par la commande.
 
-    def insert_filter(self, sig: SignalObject,
-                            filter_node: FilterNode,
-                            index: int)-> QModelIndex | None:
-        sig_item = self.find_item(self.root, sig)
+    def _node_row(self, sig: SignalObject, node) -> int:
+        if node.item_type == itemType.FILTER:
+            return sig.get_filter_index_by_id(node.id)
+        return len(sig.pipeline) + sig.get_analysis_index_by_id(node.id)
 
-        '''if not sig_item:
-            return
-        parent_index =  self.index_from_item(sig_item)
-        filter_item = TreeItem(filter_node, parent = sig_item)
+    @staticmethod
+    def _derived_of(sig: SignalObject, analysis) -> list:
+        """Signaux dérivés produits par une analyse (liés par metadata['analysis_id'])."""
+        return [ds for ds in sig.derived_signals
+                if getattr(ds, 'metadata', {}).get('analysis_id') == analysis.id]
 
-        self.beginInsertRows(parent_index, index, index)
-        sig_item.children.insert(index, filter_item)
-        self.endInsertRows()
+    def _make_node_item(self, sig: SignalObject, node, parent: TreeItem) -> TreeItem:
+        item = TreeItem(node, parent = parent)
+        if node.item_type == itemType.ANALYSE:
+            for derived in self._derived_of(sig, node):
+                item.add_child(TreeItem(derived, parent = item))
+        return item
 
-        self.new_filter.emit(filter_item.to_selection_context)'''
-
-
+    def insert_node(self, sig: SignalObject, node: FilterNode | AnalysisNode):
+        """
+        Ajoute un filtre ou une analyse dans l'arbre. À appeler APRÈS l'insertion
+        du node dans sig.pipeline / sig.analyses.
+        """
         signal_item = self.find_signal_item(sig)
-
         if signal_item is None:
             return
 
-        filter_item = TreeItem(filter_node, parent=signal_item)
+        row  = self._node_row(sig, node)
+        item = self._make_node_item(sig, node, signal_item)
 
-        parent_index = self.index_from_item(signal_item)
-        print(f'Ligne 363 TreeModel:{index}')
-        self.beginInsertRows(parent_index, index, index)
-        signal_item.insert_child(index, filter_item)
+        self.beginInsertRows(self.index_from_item(signal_item), row, row)
+        signal_item.insert_child(row, item)
         self.endInsertRows()
 
-        self.emit_node_event(ActionModifier.ADD_ACTION, filter_item)
+        self.emit_node_event(ActionModifier.ADD_ACTION, item)
 
-
-    def insert_analysis(self, sig: SignalObject, analysis_node, index: int):
-        """Insère une analyse dans l'arbre."""
-        sig_item = self.find_item(self.root, sig)
-        if not sig_item:
+    def remove_node(self, sig: SignalObject, node: FilterNode | AnalysisNode):
+        """Retire un filtre ou une analyse (et ses signaux dérivés) de l'arbre."""
+        signal_item = self.find_signal_item(sig)
+        if signal_item is None:
             return
-        
-        parent_index = self.index_from_item( sig_item)
-        analysis_item = TreeItem(analysis_node, parent = sig_item)
-
-        self.beginInsertRows(parent_index, index, index)
-        sig_item.children.insert(index, analysis_item)
-        self.endInsertRows()
-
-        self.new_analysis.emit(analysis_item.to_selection_context())
-
-    def remove_filter(self, sig: SignalObject, index: int):
-        sig_item = self.find_item(self.root, sig)
-        if not sig_item:
+        item = self.find_item_by_object_id(node.id, signal_item)
+        if item is None:
             return
 
-        parent_index =  self.index_from_item(sig_item)
-
-        self.beginRemoveRows(parent_index, index, index)
-        sig_item.children.pop(index)
-        self.endRemoveRows()
-        self.changed_filter.emit(sig_item,None)
-
-    def remove_analysis(self, sig: SignalObject, index: int):
-        """Supprime une analyse de l'arbre."""
-        sig_item = self.find_item(self.root, sig)
-        if not sig_item:
-            return
-        parent_index =  self.index_from_item(sig_item)
-        self.beginRemoveRows(parent_index, index, index)
-        sig_item.children.pop(index)
+        row = item.row()
+        self.beginRemoveRows(self.index_from_item(signal_item), row, row)
+        signal_item.children.pop(row)
         self.endRemoveRows()
 
-        self.changed_analysis.emit(sig,index)
-        #? seul signal à renvoyer le signal au lieu du sig_item
-        #! il faut supprimer les derived signals associés à cette analyse
-        #! par exemple la courbe associée (graph_controller.add_signal)
+        # le node n'existe plus : le contexte émis est celui du signal parent
+        self.emit_node_event(ActionModifier.REMOVE_ACTION, signal_item)
 
-    '''
-    def update_filter(self, sig: SignalObject, index: int):
+    def replace_node(self, sig: SignalObject, old_node, new_node):
         """
-        Mise à jour visuelle d'un FilterNode existant.
-        Robuste aux remplacements IMMUTABLES.
+        Remplace un node par sa version modifiée (nodes immutables : modifier un
+        paramètre crée un nouveau node, avec un nouvel id).
         """
-        sig_item = self.find_item(self.root, sig)
-        if sig_item is None:
+        signal_item = self.find_signal_item(sig)
+        if signal_item is None:
+            return
+        item = self.find_item_by_object_id(old_node.id, signal_item)
+        if item is None:
             return
 
-        if index < 0 or index >= sig_item.child_count():
-            return
+        item.obj = new_node
+        index = self.index_from_item(item)
 
-        filter_item = sig_item.child(index)
+        if new_node.item_type == itemType.ANALYSE:
+            # les signaux dérivés ont été recalculés : on reconstruit les enfants
+            if item.children:
+                self.beginRemoveRows(index, 0, len(item.children)-1)
+                item.children.clear()
+                self.endRemoveRows()
+            derived = self._derived_of(sig, new_node)
+            if derived:
+                self.beginInsertRows(index, 0, len(derived)-1)
+                for ds in derived:
+                    item.add_child(TreeItem(ds, parent = item))
+                self.endInsertRows()
 
-        #  synchronisation explicite avec la source de vérité
-        filter_item.obj = sig.get_filter_by_index(index)
-
-        parent_index =  self.index_from_item(sig_item)
-        model_index = self.index(index, 0, parent_index)
-
-        self.dataChanged.emit(
-                                model_index,
-                                model_index,
-                                [
-                                    Qt.ItemDataRole.DisplayRole,
-                                    Qt.ItemDataRole.DecorationRole
-                                ]
-                            )
-        self.changed_filter.emit(sig_item,index)
-        
-    def update_analysis(self, sig: SignalObject, index: int):
-        """Met à jour l'affichage d'une analyse après modification."""
-        #! actuellement si l'utilisateur modifie un analysisNode alors qu'un filternode
-        #! est présent, le filter est alors écrasé
-        sig_item = self.find_item(self.root, sig)
-        if sig_item is None:
-            return
-
-        if index < 0 or index >= sig_item.child_count():
-            return
-
-        analysis_item       = sig_item.child(index)
-        analysis_item.obj  = sig.analyses[index]
-
-        parent_index =  self.index_from_item(sig_item)
-        model_index = self.index(index, 0, parent_index)
-        self.dataChanged.emit(
-                                model_index,
-                                model_index,
+        self.dataChanged.emit(  index,
+                                index,
                                 [Qt.ItemDataRole.DisplayRole,
-                                Qt.ItemDataRole.DecorationRole]
-                            )'''
-        
-
-    def update_node(self, signal, node_id):
-        '''signal_item = self.find_signal_item(signal)
-
-        if signal_item is None:
-            return
-
-        item = self.find_item_by_object_id(node_id, signal_item)
-
-        if item is None:
-            return
-
-        index = self.index_from_item(item)
-
-        if index.isValid():
-            self.dataChanged.emit(  index,
-                                    index,
-                                    [Qt.ItemDataRole.DisplayRole,
-                                    Qt.ItemDataRole.DecorationRole])
-
-        ctx = item.to_selection_context()
-        self.node_changed.emit(ctx)'''
-        signal_item = self.find_signal_item(signal)
-
-        if signal_item is None:
-            return
-        item = self.find_item_by_object_id(node_id, signal_item)
-
-        if item is None:
-            return
-        index = self.index_from_item(item)
-        if index.isValid():
-            self.dataChanged.emit(index, index)
+                                Qt.ItemDataRole.DecorationRole])
         self.emit_node_event(ActionModifier.MODIFY_ACTION, item)
 
 

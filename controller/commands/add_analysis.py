@@ -1,8 +1,4 @@
-from typing import OrderedDict
-
-from ressources.custom_commands import ReplayableCommand
-from ressources.custom_items import AddDescriptor
-from ressources.custom_types import ActionModifier
+from ressources.custom_commands import ReplayableCommand, od_insert, od_remove
 
 class AddAnalysisCommand(ReplayableCommand):
     """Ajoute une analyse à un signal."""
@@ -12,57 +8,37 @@ class AddAnalysisCommand(ReplayableCommand):
         :param signal: SignalObject
         :param analysis_node: AnalysisNode instance
         :param model: PipelineTreeModel
-        :param index: position dans la liste analyses (None = append)
+        :param index: position dans les analyses (None = append)
         """
         super().__init__(f"Add {analysis_node.display_name}")
 
         self.signal = signal
         self.analysis_node = analysis_node
         self.model = model
-        self.index = index
-        self.error = None
-        self.derived_signal = None  # sera créé en redo()
-
-
+        self.index = len(signal.analyses) if index is None else index
+        self.derived_signal = None  # calculé par prepare()
 
     def prepare(self):
-        if self.index is None:
-            self.index = len(self.signal.analyses.values())
+        """
+        Calcul de l'analyse, appelé par le WorkspaceController AVANT le push :
+        redo() est appelé par Qt (QUndoStack.push) et une exception y serait
+        perdue. Si le calcul échoue, la commande n'est jamais empilée.
+        """
         self.derived_signal = self.analysis_node.compute(self.signal)
 
     def redo(self):
-        """
-        # Ajouter l'analyse
-        self.signal.analyses.insert(self.index, self.analysis_node)
-        """
-        # Calculer et ajouter le signal dérivé
-        '''try:
-            self.derived_signal = self.analysis_node.compute(self.signal)
-            self.signal.derived_signals.append(self.derived_signal)
-        
-        except Exception as e:
-            self.signal.analyses.pop(self.index)
-            self.error = e
-            return
-            '''
+        if self.derived_signal is None:
+            self.prepare()
         node = self.analysis_node
-        aid = node.id
-    
-        items = list(self.signal.analyses.items())
-    
-        if self.index is None:
-            items.append((aid, node))
-            self.index = len(items) - 1
-        else:
-            items.insert(self.index, (aid, node))
-    
-        self.signal.analyses = OrderedDict(items)
-        self.model.insert_analysis(self.signal, node, self.index)
+        self.signal.analyses = od_insert(self.signal.analyses, self.index, node.id, node)
+        self.signal.derived_signals.append(self.derived_signal)
+        # notifier le modèle (TreeView)
+        self.model.insert_node(self.signal, node)
 
     def undo(self):
-        items = list(self.signal.analyses.items())
-    
-        items.pop(self.index)
-        self.signal.analyses = OrderedDict(items)
-        self.model.remove_analysis(self.signal, self.index)
-
+        node = self.analysis_node
+        self.signal.analyses = od_remove(self.signal.analyses, node.id)
+        if self.derived_signal in self.signal.derived_signals:
+            self.signal.derived_signals.remove(self.derived_signal)
+        # notifier le modèle (TreeView)
+        self.model.remove_node(self.signal, node)

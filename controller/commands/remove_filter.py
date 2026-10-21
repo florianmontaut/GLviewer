@@ -1,8 +1,6 @@
 
 # controller/commands/remove_filter.py
-from typing import OrderedDict
-
-from ressources.custom_commands import ReplayableCommand
+from ressources.custom_commands import ReplayableCommand, od_insert, od_remove
 
 
 class RemoveFilterCommand(ReplayableCommand):
@@ -14,7 +12,9 @@ class RemoveFilterCommand(ReplayableCommand):
         :param index: index du filtre à supprimer
         :param model: PipelineTreeModel
         """
-        filter_node = list(signal.pipeline.values())[index]
+        filter_node = signal.get_filter_by_index(index)
+        if filter_node is None:
+            raise IndexError(f"No filter at index {index}")
         super().__init__(f"Remove {filter_node.display_name}")
 
         self.signal = signal
@@ -26,37 +26,15 @@ class RemoveFilterCommand(ReplayableCommand):
 
     # ------------------------------------------
     def redo(self):
-        """
-        self.signal.pipeline.pop(self.index)
-        self.signal.invalidate()
-        # notifier le modèle (TreeView)
-        self.model.remove_filter(self.signal, self.index)
-        
-        """
-        
-        items = list(self.signal.pipeline.items()) 
-
-        f_id, self.removed_filter = items.pop(self.index)
-        self.signal.pipeline = OrderedDict(items)
+        self.signal.pipeline = od_remove(self.signal.pipeline, self.removed_filter.id)
         self.signal.pipeline_version += 1
-        self.model.remove_filter(self.signal, self.index)
-
-        
+        # notifier le modèle (TreeView)
+        self.model.remove_node(self.signal, self.removed_filter)
 
     # ------------------------------------------
     def undo(self):
-        
-        """
-        self.signal.pipeline.insert(self.index, self.removed_filter)
-        self.signal.invalidate()
-        # notifier le modèle (TreeView)
-        self.model.insert_filter(self.signal,self.removed_filter, self.index)
-        """
-
-        items = list(self.signal.pipeline.items())
-
-        f_id = self.removed_filter.id
-        items.insert(self.index, (f_id, self.removed_filter))
-        self.signal.pipeline = OrderedDict(items)
+        node = self.removed_filter
+        self.signal.pipeline = od_insert(self.signal.pipeline, self.index, node.id, node)
         self.signal.pipeline_version += 1
-        self.model.insert_filter(self.signal, self.removed_filter, self.index)
+        # notifier le modèle (TreeView)
+        self.model.insert_node(self.signal, node)

@@ -74,7 +74,8 @@ class MenuController(QtCore.QObject):
             print("failed to load recent file menu")
             return
         path=lines[0]["address"]
-        latest_dir=path[:path.rindex('/')]
+        #os.path gère les séparateurs '/' et '\' sous Windows
+        latest_dir=os.path.dirname(path)
         self.view.latest_dir=latest_dir
         for loader in lines:
             

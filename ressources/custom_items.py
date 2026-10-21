@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import copy
 from pandas import DataFrame
@@ -41,7 +42,8 @@ class FileStruct():
     data            :   DataFrame
 
     def __post_init__(self):
-        self.name : str = self.address[self.address.rfind('/')+1:len(self.address)-4]
+        #os.path gère les séparateurs '/' et '\' sous Windows (et les extensions != 3 lettres)
+        self.name : str = os.path.splitext(os.path.basename(self.address))[0]
         self.start_x : float = 0
         self.stop_x : float = 0
         self.offset : int  = 0

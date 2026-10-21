@@ -1,6 +1,4 @@
-from typing import OrderedDict
-
-from ressources.custom_commands import ReplayableCommand
+from ressources.custom_commands import ReplayableCommand, od_replace
 
 
 class ModifyAnalysisCommand(ReplayableCommand):
@@ -13,7 +11,9 @@ class ModifyAnalysisCommand(ReplayableCommand):
         :param new_params: dict des paramètres modifiés
         :param model: PipelineTreeModel
         """
-        old_node = signal.analyses[index]
+        old_node = signal.get_analysis_by_index(index)
+        if old_node is None:
+            raise IndexError(f"No analysis at index {index}")
         new_node = old_node.clone_with(**new_params)
 
         super().__init__(f"Modify {old_node.display_name} → {new_node.display_name}")
@@ -25,83 +25,29 @@ class ModifyAnalysisCommand(ReplayableCommand):
         self.old_node = old_node
         self.new_node = new_node
 
-        # Précalculer les dérivés pour redo/undo rapide
-        self.old_derived = None
-        self.new_derived = None
+        self.old_derived = [
+                            ds for ds in signal.derived_signals
+                            if hasattr(ds, 'metadata') and
+                            ds.metadata.get('analysis_id') == old_node.id
+                            ]
+        self.new_derived = None  # calculé par prepare()
+
+    def prepare(self):
+        """Recalcul de l'analyse AVANT le push (voir AddAnalysisCommand.prepare)."""
+        self.new_derived = [self.new_node.compute(self.signal)]
+
+    def _swap(self, old, new, old_derived, new_derived):
+        self.signal.analyses = od_replace(self.signal.analyses, old.id, new.id, new)
+        for ds in old_derived:
+            if ds in self.signal.derived_signals:
+                self.signal.derived_signals.remove(ds)
+        self.signal.derived_signals.extend(new_derived)
+        self.model.replace_node(self.signal, old, new)
 
     def redo(self):
-        # Sauvegarder les anciens dérivés (lazy)
-        '''
-        if self.old_derived is None:
-            self.old_derived = [
-                                ds for ds in self.signal.derived_signals
-                                if hasattr(ds, 'metadata') and
-                                ds.metadata.get('analysis_id') == self.old_node.id
-                                ]
+        if self.new_derived is None:
+            self.prepare()
+        self._swap(self.old_node, self.new_node, self.old_derived, self.new_derived)
 
-        # Remplacer l'analyse
-        self.signal.analyses[self.index] = self.new_node
-
-        # Recalculer les dérivés
-        try:
-            self.new_derived = self.new_node.compute(self.signal)
-
-            # Remplacer les anciens dérivés
-            for old_ds in self.old_derived:
-                if old_ds in self.signal.derived_signals:
-                    self.signal.derived_signals.remove(old_ds)
-
-            self.signal.derived_signals.append(self.new_derived)
-        except Exception as e:
-            # rollback
-            self.signal.analyses[self.index] = self.old_node
-            raise RuntimeError(f"Analysis recompute failed: {e}")
-
-        self.model.update_analysis(self.signal, self.index)
-
-        '''
-        
-        items = list(self.signal.analyses.items())
-
-        old_id, _ = items[self.index]
-
-        new_node = self.new_node
-        new_id = new_node.id
-
-        items[self.index] = (new_id, new_node)
-
-        self.signal.analyses = OrderedDict(items)
-        self.model.update_analysis(self.signal, self.index)
-        
-            
-        
-        
-        
-        
     def undo(self):
-        '''
-        self.signal.analyses[self.index] = self.old_node
-
-        # Restaurer les anciens dérivés
-        if self.new_derived in self.signal.derived_signals:
-            self.signal.derived_signals.remove(self.new_derived)
-
-        self.signal.derived_signals.extend(self.old_derived)
-
-        self.model.update_analysis(self.signal, self.index)
-        
-        '''
-        items = list(self.signal.analyses.items())
-
-        new_id = self.new_node.id
-        idx = next(i for i, (aid, _) in enumerate(items) if aid == new_id)
-
-        old_node = self.old_node
-        old_id = old_node.id
-
-        items[idx] = (old_id, old_node)
-
-        self.signal.analyses = OrderedDict(items)
-
-        self.model.update_analysis(self.signal, self.index)
-        
+        self._swap(self.new_node, self.old_node, self.new_derived, self.old_derived)

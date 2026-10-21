@@ -5,3 +5,5 @@ model/analysis/__pycache__/
 model/filters/__pycache__/
 ressources/__pycache__/
 view/__pycache__/
+tests/__pycache__/
+.pytest_cache/

@@ -118,32 +118,33 @@ class WorkspaceController(QtCore.QObject):
         action_request.model = self.model
         
         self.graph_controller.freeze_updates(True)
-        cmd=self.registry.execute(sig,action_request)
         try:
-            # si la commande est de nature à échouer (modélisation / analyse complexe)
-            # on essaie de générer le signal dérivé, i.e le résultat de l'analyse et
-            # dans le cas d'un échec on traite les erreurs.
+            # Création de la commande (validation des paramètres) puis, si la commande
+            # est de nature à échouer (modélisation / analyse complexe), génération du
+            # signal dérivé (prepare) AVANT le push : redo() est appelé par Qt et une
+            # exception y serait perdue. En cas d'échec, rien n'est empilé.
+            cmd=self.registry.execute(sig,action_request)
             if hasattr(cmd, "prepare"):
-                cmd.prepare() 
+                cmd.prepare()
 
-        except Exception as e:
+        except MissingParameters as e:
+            self._ask_missing_params(sig, action_request, e.missing)
+            return
+
+        except (AnalysisError, RuntimeError, ValueError, IndexError) as e:
             #! créer une méthode handleError
-            if isinstance(e, InvalidModelFit):
-                self._ask_missing_params(sig, action_request, getattr(e, "missing_params", {}))
-                QtWidgets.QMessageBox.warning(
-                                                None,
-                                                "Analyse impossible",
-                                                f"L'analyse a échoué :\n{e}"
-                                            )
-                return
-            elif isinstance(e, MissingParameters):
-                self._ask_missing_params(sig, action_request, e.missing_params)
-                return
+            # InvalidModelFit, fit scipy non convergent, paramètres invalides,
+            # node introuvable...
+            QtWidgets.QMessageBox.warning(
+                                            None,
+                                            "Action impossible",
+                                            f"L'opération a échoué :\n{e}"
+                                        )
+            return
 
         finally:
             self.graph_controller.freeze_updates(False)
 
-        
         self.undo_stack.push(cmd)
         index = cmd.index
         

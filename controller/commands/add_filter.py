@@ -1,10 +1,6 @@
 
 # controller/commands/add_filter.py
-from typing import OrderedDict
-
-from ressources.custom_commands import ReplayableCommand
-from ressources.custom_items import AddDescriptor
-from ressources.custom_types import ActionModifier
+from ressources.custom_commands import ReplayableCommand, od_insert, od_remove
 
 class AddFilterCommand(ReplayableCommand):
 
@@ -22,52 +18,21 @@ class AddFilterCommand(ReplayableCommand):
         self.signal = signal
         self.filter_node = filter_node
         self.model = model
-        self.index = index
+        # position finale fixée dès la création : WorkspaceController l'utilise
+        # après le push pour construire le SelectionContext
+        self.index = len(signal.pipeline) if index is None else index
 
     # ------------------------------------------
     def redo(self):
-        '''
-        
-        if self.index is None:
-            self.index = len(self.signal.pipeline)-1 if len(self.signal.pipeline)>0 else 0
-        self.signal.pipeline.insert(self.index, self.filter_node)
-        self.signal.invalidate()
-        
+        node = self.filter_node
+        self.signal.pipeline = od_insert(self.signal.pipeline, self.index, node.id, node)
         self.signal.pipeline_version += 1
-        
         # notifier le modèle (TreeView)
-        self.model.insert_filter(self.signal, self.filter_node, self.index)
-        
-        
-        '''
-        
-        filter_id = self.filter_node.id
-        items = list(self.signal.pipeline.values())
-        if self.index is None:
-            items.append((filter_id, self.filter_node))
-            self.index = len(items) - 1
-        else:
-            items.insert(self.index, (filter_id, self.filter_node))
-        self.signal.pipeline = OrderedDict(items)
-        self.signal.pipeline_version += 1
-        self.model.insert_filter(self.signal, self.filter_node, self.index)
-        
-        
+        self.model.insert_node(self.signal, node)
 
     # ------------------------------------------
     def undo(self):
-        '''
-        self.signal.pipeline.pop(self.index)
-        self.signal.invalidate()
-        
-        # notifier le modèle (TreeView)
-        self.model.remove_filter(self.signal, self.index)
-        '''
-        items = list(self.signal.pipeline.items())
-
-        # supprime l'élément inséré
-        items.pop(self.index)
-        self.signal.pipeline = OrderedDict(items)
+        self.signal.pipeline = od_remove(self.signal.pipeline, self.filter_node.id)
         self.signal.pipeline_version += 1
-        self.model.remove_filter(self.signal, self.index)
-        
+        # notifier le modèle (TreeView)
+        self.model.remove_node(self.signal, self.filter_node)

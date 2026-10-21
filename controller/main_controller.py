@@ -127,62 +127,37 @@ class MainController(QtCore.QObject):
             - file_obj : FileObject à ajouter
         """
 
-        if self.workspace is None:
-            self.create_workspace()
-        else:
-            #si le fichier est déjà chargé on sort de méthode
-            if file_obj.address in [file.address for file in self.workspace.files]:
-                return
+        #si le fichier est déjà chargé on sort de méthode
+        if file_obj.address in [file.address for file in self.workspace.files]:
+            return
 
         self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
         self.workspace.add_file(file_obj)
 
-        # Construire QAbstractItemModel
         if self.model is None:
-            self.model = PipelineTreeModel(self.workspace)
-            self.model.node_event.connect(self._on_node_event)
+            # premier fichier : le modèle est construit à partir du workspace
+            self._init_workspace_model()
         else:
             self.model.add_file_subtree(file_obj)
 
-        # Attacher modèle → TreeView
-        self.tree_ctrl.set_model(self.model)
-
-        # PipelineController avec UndoStack
-        self.workspace_ctrl = WorkspaceController(self.model,self.graph_ctrl)
-        # Create undo/redo actions linked to the stack
-        self._init_undo_redo()
-        self._connect_workspace_signals()
-        # Ajouter toutes les courbes au graph
-        for file_obj in self.workspace.files:
-            for sig in file_obj.signals:
-                self.graph_ctrl.add_signal_curve(sig)
-                #! ordered dict
-                for analysis in sig.analyses.values():
-                    derived = analysis.compute(sig)
-                    sig.derived_signals.append(derived)
-                    self.graph_ctrl.add_signal_curve(derived)
+        # Seules les courbes du nouveau fichier sont ajoutées au graph
+        self._add_file_curves(file_obj)
         self.graph_ctrl.update_vbox()
 
 
     def create_workspace(self,workspace:Workspace):
         """
-        Créer un nouveau workspace et l'attacher à tous les contrôleurs.
+        Remplace le workspace courant (chargement d'un projet .json) et l'attache à
+        tous les contrôleurs.
         """
+        # nettoyage du graphique de l'ancien workspace
+        for sig in list(self.graph_ctrl.curves.keys()):
+            self.graph_ctrl.remove_signal_curve(sig)
 
         self.workspace=workspace
-        self.model = PipelineTreeModel(self.workspace)
-        self.model.node_event.connect(self._on_node_event)
-        self.tree_ctrl.set_model(self.model)
-        self.workspace_ctrl = WorkspaceController(self.model,self.graph_ctrl)
-
-        # Create undo/redo actions linked to the stack
-        self._init_undo_redo()
-        self._connect_workspace_signals()
 
         for file_obj in self.workspace.files:
-            self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
             for sig in file_obj.signals:
-                self.graph_ctrl.add_signal_curve(sig)
                 #! ordered dict
                 for analysis in sig.analyses.values():
                     #! le treeview ne semble pas être mis à jour et l'index de sélection des courbes
@@ -191,10 +166,46 @@ class MainController(QtCore.QObject):
                         ref_file =  [   file for file in self.workspace.files if
                                         file.name == analysis.get_param('reference_file')][0]
                         analysis.resolve_reference({s.name: s for s in ref_file.signals})
-                    derived = analysis.compute(sig)
-                    sig.derived_signals.append(derived)
-                    self.graph_ctrl.add_signal_curve(derived)
+        # les signaux dérivés sont calculés avant la construction de l'arbre
+        # afin qu'ils y apparaissent sous leur analyse
+        for file_obj in self.workspace.files:
+            self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
+            self._add_file_curves(file_obj)
+
+        self._init_workspace_model()
+        # l'historique undo/redo concerne l'ancien workspace
+        self.workspace_ctrl.undo_stack.clear()
         self.graph_ctrl.update_vbox()
+
+    def _init_workspace_model(self):
+        """
+        Construit le modèle Qt du workspace courant et l'attache au TreeView.
+        Le WorkspaceController (pile undo/redo) n'est créé qu'une seule fois.
+        """
+        self.model = PipelineTreeModel(self.workspace)
+        self.model.node_event.connect(self._on_node_event)
+        self.tree_ctrl.set_model(self.model)
+
+        if self.workspace_ctrl is None:
+            self.workspace_ctrl = WorkspaceController(self.model,self.graph_ctrl)
+            # Create undo/redo actions linked to the stack
+            self._init_undo_redo()
+            self._connect_workspace_signals()
+        else:
+            self.workspace_ctrl.model = self.model
+
+    def _add_file_curves(self, file_obj:FileObject):
+        """
+        Ajoute au graph les courbes d'un fichier et (re)calcule les signaux dérivés
+        de ses analyses.
+        """
+        for sig in file_obj.signals:
+            self.graph_ctrl.add_signal_curve(sig)
+            #! ordered dict
+            for analysis in sig.analyses.values():
+                derived = analysis.compute(sig)
+                sig.derived_signals.append(derived)
+                self.graph_ctrl.add_signal_curve(derived)
 
     # -------------------------------------------------------------------------
     # TREE SIGNALS
@@ -289,19 +300,35 @@ class MainController(QtCore.QObject):
         if ctx.item is not None:
             self.tree_ctrl.select_tree_from_context(ctx)
         self.param_ctrl.load_params(ctx)
-        if ctx.role == itemType.ANALYSE:
-            self.graph_ctrl.add_signal_curve(ctx.signal)
-        self.graph_ctrl.update_signal(ctx.signal)
+        self._refresh_signal_curves(ctx.signal)
 
 
     def _on_node_changed(self, ctx:SelectionContext):
         self.param_ctrl.load_params(ctx)
-        self.graph_ctrl.update_signal(ctx.signal)
+        self._refresh_signal_curves(ctx.signal)
 
 
     def _on_node_removed(self, ctx:SelectionContext):
         self.param_ctrl.load_params(ctx)
-        self.graph_ctrl.update_signal(ctx.signal)
+        self._refresh_signal_curves(ctx.signal)
+
+    def _refresh_signal_curves(self, sig):
+        """
+        Met à jour la courbe d'un signal (pipeline de filtres) et synchronise les
+        courbes de ses signaux dérivés avec sig.derived_signals (ajout / undo /
+        modification d'une analyse).
+        """
+        self.graph_ctrl.update_signal(sig)
+
+        for derived in sig.derived_signals:
+            self.graph_ctrl.add_signal_curve(derived)
+
+        obsolete = [    curve_sig for curve_sig in self.graph_ctrl.curves
+                        if curve_sig.item_type == itemType.DERIVED
+                        and curve_sig.parent_signal is sig
+                        and curve_sig not in sig.derived_signals]
+        for curve_sig in obsolete:
+            self.graph_ctrl.remove_signal_curve(curve_sig)
 
 
     def select_from_context(self, ctx: SelectionContext, source: str = "external"):
@@ -459,7 +486,8 @@ class MainController(QtCore.QObject):
         self.cursor_ctrl.set_snap(enabled)
 
     def _on_cursor_moved(self,x):
-        if self.model is None:
+        # x est None tant que la souris n'a pas survolé le graphique
+        if self.model is None or x is None:
             return
         self.cursor_ctrl.update_x(x)
         # Modèle (pour la colonne "valeur au curseur")
@@ -502,12 +530,13 @@ class MainController(QtCore.QObject):
                     self.graph_ctrl.update_signal(signal)
             return
 
+        # ActionRequest.index est une POSITION (int) : on la retrouve à partir de l'id
         elif ctx.role == itemType.FILTER:
-            action_type=sig.get_filter_by_id(ctx.filter_id).action_type 
-            index=ctx.filter_id
+            action_type=sig.get_filter_by_id(ctx.filter_id).action_type
+            index=ctx.filter_index
         else:
             action_type=sig.get_analysis_by_id(ctx.analysis_id).action_type
-            index=ctx.analysis_id
+            index=ctx.analysis_index
         self.workspace_ctrl.push(
                                 ctx.signal,
                                 ActionRequest(
@@ -531,7 +560,9 @@ class MainController(QtCore.QObject):
                                 analysis_index=ctx.analysis_index,
                                 item=None
                             )'''
-        self.on_item_selected(ctx)
+        # Pas de on_item_selected(ctx) ici : le node modifié a été remplacé par un clone
+        # (nouvel id), ctx est donc obsolète. La resélection est faite par le
+        # WorkspaceController (undo_redo_macro_activated) et le node_event MODIFY.
 
 
     # -------------------------------------------------------------------------

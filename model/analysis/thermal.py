@@ -89,7 +89,8 @@ class ThermalModelAnalysis(AnalysisNode):
             raise ValueError("Extrapolation time must be >= 0")
         #! ajouter une vérif sur la validité de la plage (start et stop).
 
-        self.id = uuid.uuid4().hex[:8]
+        # self.id est attribué par AnalysisNode.__init__ : il sert de clé dans
+        # signal.analyses et ne doit pas changer à chaque validation
         self.t_start = None
         self.t_end = None
         self.results: custom_items.ThermalFitResult | None = None

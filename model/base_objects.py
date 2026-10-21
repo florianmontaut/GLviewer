@@ -306,6 +306,7 @@ class SignalObject:
         # cache interne
         self._cache = None
         self._cache_valid = False
+        self._cache_version = None # pipeline_version ayant servi au calcul du cache
 
     # ---------------- BASIC RAW ACCESS ----------------
 
@@ -332,7 +333,8 @@ class SignalObject:
     # ---------------- PIPELINE COMPUTATION ----------------
     def compute(self):
         """Calcule y en appliquant chaque filtre dans l’ordre."""
-        if self._cache_valid:
+        # toute modification du pipeline incrémente pipeline_version (voir commandes)
+        if self._cache_valid and self._cache_version == self.pipeline_version:
             return self._cache
 
         y = self.raw_y.copy()
@@ -342,6 +344,7 @@ class SignalObject:
 
         self._cache = y
         self._cache_valid = True
+        self._cache_version = self.pipeline_version
         return y
 
     @property
@@ -511,12 +514,15 @@ class SignalObject:
         sig.pen         =   custom_struct_functions.dict_to_QPen( data.get("pen"))
 
         #! Ordered dict n'est pas sérialisable ! 
-        for node_id,node_data in data.get("pipeline", []): 
+        # l'id sauvegardé est réattribué au node : clé du dict et node.id doivent coïncider
+        for node_id,node_data in data.get("pipeline", []):
             node = filter_factory.create(node_data)
-            sig.pipeline[node_id]=node 
-        for node_id,node_data in data.get("analyses", []): 
-            node = analysis_factory.create(node_data) 
-            sig.analyses[node_id]=(node) 
+            node.id = node_id
+            sig.pipeline[node_id]=node
+        for node_id,node_data in data.get("analyses", []):
+            node = analysis_factory.create(node_data)
+            node.id = node_id
+            sig.analyses[node_id]=node
         return sig
 
 
