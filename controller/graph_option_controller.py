@@ -78,6 +78,9 @@ class GraphTreeController(QtCore.QObject):
         """
         Méthode gérant l'initialisation du Widget GraphTree
         """
+        # QObject : indispensable pour émettre des signaux et en recevoir
+        # (ex: suppression d'un texte, sigRemoved)
+        super().__init__()
         self.graphPlot=plot
         self.graphTree=tree
         self.textItems=[]
@@ -170,14 +173,14 @@ class GraphTreeController(QtCore.QObject):
                     continue
 
             if ptype == "cursors":
-                
-                param=custom_parameters.LinkedCursors(  
+
+                param=custom_parameters.LinkedCursors(
                                                     name=pname,
                                                     graphWidget = self.graphPlot,
                                                     cursors_setting = spec['cursors_setting']
                                                     )
                 #param.setOpts(expanded=spec.get("expanded", True) )
-                
+
                 param.setOpts(**spec)
                 children.append(param)
                 continue
@@ -200,45 +203,52 @@ class GraphTreeController(QtCore.QObject):
                                 )
 
 
-    def addText(self,parent=None,pos=None):
-        """_summary_
+    def addText(self, pos, anchor_pos=None, text=None, color=None, edit=True):
         """
-        if pos is None:
-            pos=self.mouseCursor.valtext.pos()
+        Ajoute un texte sur le graphique.
 
-
-        if      self.mouseCursor.param('show X value').value() or \
-                self.mouseCursor.param('show Y value').value():
-            text_str=self.mouseCursor.valtext.toPlainText()
-        else:
-            text_str=""
-
-        if self.mouseCursor.param('snap to selected signal').value():
-            #!actuellement curve=None
-            curve=self.mouseCursor.curve
-            color =  QtGui.QColor("black")
-        else:
+        Args:
+            pos         (tuple(float,float))        : position du texte (coordonnées des données)
+            anchor_pos  (tuple(float,float)|None)   : point annoté relié au texte par une
+                                                      flèche (ex: échantillon d'une courbe)
+            text        (str|None)                  : texte initial (None : valeurs affichées
+                                                      par le curseur souris, s'il y en a)
+            color       (QColor|None)               : couleur du texte et de la flèche
+            edit        (bool)                      : ouvre l'éditeur de texte
+        Returns:
+            pgText: le texte créé
+        """
+        if text is None:
+            if      self.mouseCursor.param('show X value').value() or \
+                    self.mouseCursor.param('show Y value').value():
+                text=self.mouseCursor.valtext.toPlainText()
+            else:
+                text=""
+        if color is None:
             color = QtGui.QColor("black")
 
         text_item = custom_dialogs.pgText(
                                         plotItem=self.graphPlot,
-                                        text=text_str,
+                                        text=text,
                                         color=color,
-                                        anchor_pos=(pos.x(), pos.y())
+                                        anchor_pos=anchor_pos,
+                                        # annotation : le texte est placé au-dessus à droite
+                                        # du point (coin bas-gauche du texte sur pos)
+                                        anchor=(0,1) if anchor_pos is not None else (0,0)
                                         )
 
+        self.graphPlot.addItem(text_item, ignoreBounds=True)
+        text_item.setPos(QtCore.QPointF(*pos))
+        text_item.createArrow()
+        text_item.sigRemoved.connect(self._on_text_removed)
+        self.textItems.append(text_item)
+        if edit:
+            text_item.textEditor()
+        return text_item
 
-        self.graphPlot.addItem(text_item)
-        #!La flèche ne reçoit pas les bonnes coordonnées et angles
-        #text_item.createArrow()
-        '''
-        if parent is not None:
-            text.setParentItem(parent)
-            text.setPos(QtCore.QPointF(0,0))
-        else:
-            text.setPos(pos + QtCore.QPointF(20,20))
-        '''
-        text_item.textEditor()
+    def _on_text_removed(self, text_item):
+        if text_item in self.textItems:
+            self.textItems.remove(text_item)
 
     def update_settings(self,new_settings):
 

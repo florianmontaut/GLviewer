@@ -273,20 +273,26 @@ class ScaleDialog(QDialog):
 
 
 class AnchorHandle(QGraphicsEllipseItem):
+    """
+    Point annoté par un pgText (extrémité de la flèche). Déplaçable à la souris.
+    ItemIgnoresTransformations : le rayon est en pixels, quel que soit le zoom
+    (la position, elle, reste en coordonnées des données).
+    """
 
     def __init__(self, radius=4, color=QtGui.QColor("red"), owner=None):
         super().__init__(-radius, -radius, 2*radius, 2*radius)
 
         self.owner = owner
 
-        self.setBrush(color)
-        #self.setPen(pg.mkPen(QtCore.Qt.PenStyle.NoPen))
+        self.setBrush(QtGui.QBrush(color))
+        self.setPen(QtGui.QPen(color))
         self.setZValue(9)
 
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
             QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges |
-            QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            QGraphicsItem.GraphicsItemFlag.ItemIsSelectable |
+            QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
         )
 
     def itemChange(self, change, value):
@@ -298,6 +304,16 @@ class AnchorHandle(QGraphicsEllipseItem):
 
 
 class pgText(pg.TextItem):
+    """
+    Texte ajouté sur le graphique, éventuellement relié par une flèche à un point annoté
+    (anchor_pos, en coordonnées des données : ex. échantillon d'une courbe).
+        - glisser le texte ou le point d'ancrage : la flèche suit (ainsi qu'au zoom)
+        - double-clic : édition du texte
+        - Suppr : suppression du texte et de sa flèche
+    """
+
+    # émis après la suppression du texte (et de sa flèche) du graphique
+    sigRemoved = QtCore.pyqtSignal(object)
 
     def __init__(self,plotItem,text=None,anchor_pos=None,*args,**kwargs):
 
@@ -312,9 +328,10 @@ class pgText(pg.TextItem):
         #flag ne permettant l'ouverture que d'une seule fenêtre par pgTextitem en même temps
         self.Onflag=False
         self.font=QtGui.QFont("Times", 8)
-        self.color=kwargs.get("color",QtGui.QColor("black"))
+        self.color=pg.mkColor(kwargs.get("color",QtGui.QColor("black")))
+        self.window=None
 
-        # Point exact à annoter
+        # Point exact à annoter (coordonnées des données)
         self.anchor_pos = anchor_pos
 
         # Flèche
@@ -322,6 +339,7 @@ class pgText(pg.TextItem):
         self.anchorHandle = None
         self.lineItem = None
         self.setZValue(10)
+        self._removed = False
 
     def keyPressEvent(self, event):
         """
@@ -329,12 +347,11 @@ class pgText(pg.TextItem):
         Args:
             event (QEvent): entrée clavier
         """
-
-        if event.key() == QtCore.Qt.Key.Key_Delete | self.hasFocus():
-            #//TODO : l'élément est caché pour l'instant (il devrait être
-            #//TODO détruit mais je ne sais l'implémenter)
-            self.hide()
-        event.accept()
+        if event.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace):
+            self.delete()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def mousePressEvent(self,ev):
         """Méthode dédié à l'apparition d'un clic de la souris
@@ -344,6 +361,8 @@ class pgText(pg.TextItem):
         if ev.button() != QtCore.Qt.MouseButton.LeftButton :
             ev.ignore()
         else:
+            # le focus permet la suppression au clavier (Suppr)
+            self.setFocus()
             ev.accept()
 
     def mouseDoubleClickEvent(self,ev):
@@ -360,7 +379,8 @@ class pgText(pg.TextItem):
 
     def textEditor(self):
         """
-        Méthode gérant l'apparition de la fenêtre de modification du texte
+        Méthode gérant l'apparition de la fenêtre de modification du texte. Annuler
+        l'édition d'un texte vide (ex: texte venant d'être créé) le supprime.
         """
         if self.toPlainText() is not None:
             self.window=TextDialog(text=self.toPlainText(),font=self.font,color=self.color)
@@ -371,47 +391,35 @@ class pgText(pg.TextItem):
         def updateText():
             html,self.font,self.color=self.window.getText()
             self.setHtml(html)
+            self.update_arrow()
+        def cancelled():
+            if not self.toPlainText().strip():
+                self.delete()
         self.window.accepted.connect(updateText)
-
-    '''
-    def addArrow(self):
-        """
-        #! A CODER
-        Méthode gérant la création d'une flêche reliant le text à la courbe parent
-        """
-        g = pg.GraphItem()
-        ## Define positions of nodes:
-        # 1er point = position x,y sur la courbe
-        # 2eme point = position x,y du texte
-        pos = np.array([ [0,0], [10,0]])
-        ## Define the set of connections in the graph
-        adj = np.array([[0,1]])
-
-        ## Define the symbol to use for each node (this is optional)
-        ## Define the line style for each connection (this is optional)
-        lines = (255,0,0,255)
-
-        ## Update the graph
-        g.setData(pos=pos, adj=adj, pen=lines, size=0,  pxMode=False)
-    '''
+        self.window.rejected.connect(cancelled)
 
     # -----------------------------------------------------
     # Création de la flèche
     # -----------------------------------------------------
 
-
     def createArrow(self):
-        if self.anchor_pos is None:
+        """
+        Crée la flèche reliant le texte à anchor_pos. Ligne, pointe et point d'ancrage
+        sont placés dans le repère des DONNÉES (enfants de la ViewBox), comme le texte.
+        """
+        if self.anchor_pos is None or self.lineItem is not None:
             return
 
-        # Ligne
+        # Ligne (pen cosmétique : épaisseur en pixels quel que soit le zoom)
+        pen = QtGui.QPen(self.color, 1)
+        pen.setCosmetic(True)
         self.lineItem = QGraphicsLineItem()
-        self.lineItem.setPen(QtGui.QPen(self.color, 1))
+        self.lineItem.setPen(pen)
         self.lineItem.setZValue(self.zValue() - 2)
 
-        # Tête de flèche
+        # Tête de flèche (pxMode : dimensions en pixels)
         self.arrow = pg.ArrowItem(
-                                    headLen=10,
+                                    headLen=12,
                                     tipAngle=30,
                                     baseAngle=20,
                                     pen=pg.mkPen(self.color),
@@ -425,17 +433,18 @@ class pgText(pg.TextItem):
                                             owner=self
                                         )
 
-        self.plotItem.addItem(self.lineItem)
-        self.plotItem.addItem(self.arrow)
-        self.plotItem.addItem(self.anchorHandle)
+        for item in (self.lineItem, self.arrow, self.anchorHandle):
+            self.plotItem.addItem(item, ignoreBounds=True)
 
-        self.anchorHandle.setPos(*self.anchor_pos)
+        self.anchorHandle.setPos(QtCore.QPointF(*self.anchor_pos))
+        # le texte a une taille fixe en pixels : au zoom, son coin le plus proche du
+        # point annoté change de coordonnées
+        self.plotItem.vb.sigTransformChanged.connect(self.update_arrow)
         self.update_arrow()
 
     # -----------------------------------------------------
     # Mise à jour de la flèche
     # -----------------------------------------------------
-
 
     def _roiCornersScene(self):
         """
@@ -452,63 +461,64 @@ class pgText(pg.TextItem):
 
         return [self.mapToScene(p) for p in corners_local]
 
-
-    def _closestCornerToAnchor(self):
-        anchor_pos = self.anchorHandle.scenePos()
+    def _closestCornerToAnchor(self, anchor_scene):
         corners = self._roiCornersScene()
+        return min(corners, key=lambda corner: QtCore.QLineF(corner, anchor_scene).length())
 
-        distances = [
-            (corner, QtCore.QLineF(corner, anchor_pos).length())
-            for corner in corners
-        ]
-
-        return min(distances, key=lambda x: x[1])[0]
-
-
-
-    def update_arrow(self):
-        if not self.lineItem or not self.arrow or not self.anchorHandle:
+    def update_arrow(self, *_):
+        """
+        Les calculs de distance et d'angle se font à l'écran (coordonnées scene, en
+        pixels) ; la ligne et la pointe sont ensuite placées en coordonnées des données.
+        """
+        if self.lineItem is None or self.arrow is None or self.anchorHandle is None:
             return
+        vb = self.plotItem.vb
+        # après un zoom, la transformation du texte (taille fixe en pixels) peut ne pas
+        # encore être à jour : rien ne garantit l'ordre des notifications de la ViewBox
+        self.updateTransform()
 
-        anchor_pos = self.anchorHandle.scenePos()
+        anchor_view  = self.anchorHandle.pos()
+        anchor_scene = vb.mapViewToScene(anchor_view)
+        self.anchor_pos = (anchor_view.x(), anchor_view.y())
 
-        # Coin du ROI optimal
-        start_point = self._closestCornerToAnchor()
+        # Coin du texte le plus proche du point annoté
+        start_scene = self._closestCornerToAnchor(anchor_scene)
+        start_view  = vb.mapSceneToView(start_scene)
+        self.lineItem.setLine(QtCore.QLineF(start_view, anchor_view))
 
-        # Ligne finie
-        line = QtCore.QLineF(start_point, anchor_pos)
-        self.lineItem.setLine(line)
+        # Orientation de la pointe : ArrowItem pointe vers -x pour angle=0 (repère écran,
+        # y vers le bas) ; on l'oriente selon le vecteur texte -> point annoté
+        dx = anchor_scene.x() - start_scene.x()
+        dy = anchor_scene.y() - start_scene.y()
+        angle = np.degrees(np.arctan2(-dy, -dx))
 
-        # Orientation flèche
-        dx = line.dx()
-        dy = line.dy()
-        angle = -np.degrees(np.arctan2(dy, dx))
-
-        self.arrow.setPos(anchor_pos)
+        self.arrow.setPos(anchor_view)
         self.arrow.setStyle(angle=angle)
 
     # -----------------------------------------------------
-    # Callback automatique lors d’un déplacement
+    # Callback automatique lors d'un déplacement
     # -----------------------------------------------------
-
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             self.update_arrow()
         return super().itemChange(change, value)
 
-
     # -----------------------------------------------------
     # Suppression propre
     # -----------------------------------------------------
 
     def delete(self):
-        if self.arrow:
-            self.plotItem.removeItem(self.arrow)
-        if self.anchorHandle:
-            self.plotItem.removeItem(self.anchorHandle)
+        if self._removed:
+            return
+        self._removed = True
+        if self.lineItem is not None:
+            self.plotItem.vb.sigTransformChanged.disconnect(self.update_arrow)
+        for item in (self.arrow, self.lineItem, self.anchorHandle):
+            if item is not None:
+                self.plotItem.removeItem(item)
         self.plotItem.removeItem(self)
-
+        self.sigRemoved.emit(self)
 
 
 

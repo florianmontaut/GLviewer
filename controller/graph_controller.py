@@ -1,6 +1,7 @@
 
 # controller/graph_controller.py
 
+import numpy as np
 from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
@@ -184,6 +185,10 @@ class GraphController(QtCore.QObject):
         self._init_cursor()
         # sélection de la plage des données d'entrée d'un modèle
         self.range_picker = RangePicker(self.plot, self.graph)
+        # position (scene) du dernier clic droit dans le graphique : position des actions
+        # du menu contextuel (ex: ajout de texte)
+        self._context_scene_pos = None
+        self.plot.scene().sigMouseClicked.connect(self._remember_context_click)
 
     @property
     def mouse_pos(self):
@@ -448,11 +453,72 @@ class GraphController(QtCore.QObject):
         Route l'action demandée vers la bonne méthode métier
         """
         if action_type == custom_types.qSignalType.TEXT:
-            self.graph_tree_ctrl.addText()
+            self.add_text_annotation()
         else:
             self.menu_actions_triggered.emit(   custom_types.ActionModifier.ADD_ACTION,
                                                 action_type,
                                                 macro_name)
+
+    # ----------------------------------------------------
+    # Texte / annotations
+    # ----------------------------------------------------
+
+    # décalage (pixels) du texte d'une annotation par rapport au point annoté
+    ANNOTATION_OFFSET = QtCore.QPointF(30, -30)
+
+    def _remember_context_click(self, ev):
+        """Mémorise la position du clic droit (ouverture du menu contextuel)."""
+        if (ev.button() == QtCore.Qt.MouseButton.RightButton and
+                self.vb.sceneBoundingRect().contains(ev.scenePos())):
+            self._context_scene_pos = QtCore.QPointF(ev.scenePos())
+
+    def nearest_sample(self, sig, scene_pos: QtCore.QPointF) -> tuple[float, float] | None:
+        """
+        Échantillon (x, y) de sig le plus proche d'un point de l'écran. La distance est
+        mesurée en pixels : un écart de 1 °C et un écart de 1 s n'ont pas le même poids
+        selon le zoom.
+        """
+        x = np.asarray(sig.x, dtype=float)
+        y = np.asarray(sig.y, dtype=float)
+        if x.size == 0:
+            return None
+        target = self.vb.mapSceneToView(scene_pos)
+        px_w, px_h = self.vb.viewPixelSize()
+        distance = ((x - target.x()) / px_w)**2 + ((y - target.y()) / px_h)**2
+        if np.all(np.isnan(distance)):
+            return None
+        i = int(np.nanargmin(distance))
+        return float(x[i]), float(y[i])
+
+    def add_text_annotation(self, scene_pos: QtCore.QPointF | None = None):
+        """
+        Ajoute un texte à la position du clic droit (scene_pos par défaut). Si une courbe
+        visible est sélectionnée, le texte annote son échantillon le plus proche du clic :
+        il est relié par une flèche et prérempli avec la valeur de l'échantillon.
+        """
+        if scene_pos is None:
+            scene_pos = self._context_scene_pos
+        if scene_pos is None:
+            scene_pos = self.vb.sceneBoundingRect().center()
+
+        sig = self.old_highlight
+        sample = None
+        if sig is not None and sig in self.curves and self.curves[sig].isVisible():
+            sample = self.nearest_sample(sig, scene_pos)
+
+        if sample is None:
+            click = self.vb.mapSceneToView(scene_pos)
+            return self.graph_tree_ctrl.addText(pos=(click.x(), click.y()))
+
+        x, y = sample
+        text_scene = self.vb.mapViewToScene(QtCore.QPointF(x, y)) + self.ANNOTATION_OFFSET
+        text_pos = self.vb.mapSceneToView(text_scene)
+        unit = getattr(sig, 'unit', '') or ''
+        text = f"{sig.name}\n{y:.2f} {unit} @ {x:.0f} {self.opts['X_unit']}"
+        return self.graph_tree_ctrl.addText(pos         = (text_pos.x(), text_pos.y()),
+                                            anchor_pos  = (x, y),
+                                            text        = text,
+                                            color       = sig.pen.color())
 
     def on_selection_changed(self,sig:SignalObject=None):
 
