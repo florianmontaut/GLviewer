@@ -85,7 +85,8 @@ def test_invalid_range_is_reported(ctrl, step_file, warnings_shown, bad_range):
 def test_projection_duration(ctrl, step_file):
     sig = _signal(ctrl, step_file)
     ctrl.workspace_ctrl.push(sig, add(T.MODEL, {"model_range": [200.0, 400.0],
-                                                "projection_duration": 1000.0}))
+                                                "projection_duration": 1000.0,
+                                                "projection_auto": False}))
     assert sig.derived_signals[0].x[-1] == pytest.approx(400.0 + 1000.0)
 
 

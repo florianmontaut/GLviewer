@@ -131,7 +131,8 @@ def test_limits_follow_visibility(ctrl, shown, qapp):
 def test_limits_include_model_projection(ctrl, shown):
     sig = ctrl.workspace.files[0].signals[0]
     ctrl.workspace_ctrl.push(sig, add(T.MODEL, {"model_range": [0.0, 300.0],
-                                                "projection_duration": 1000.0}))
+                                                "projection_duration": 1000.0,
+                                                "projection_auto": False}))
     shown.vb.setRange(xRange=(-1e9, 1e9), padding=0)
     x0, x1, _, _ = _view(shown)
     assert x1 >= 1300            # la projection du modèle (jusqu'à 1300 s) reste atteignable

@@ -614,15 +614,16 @@ class MainController(QtCore.QObject):
 
     def _current_signal(self):
         """
-        Retourne le signal actuellement sélectionné dans la TreeView.
+        Retourne le signal visé par les actions du menu : le signal sélectionné dans la
+        TreeView, ou le signal parent du filtre / de l'analyse / du signal dérivé
+        sélectionné (voir TreeItem.action_signal).
         """
         sel = self.view.treefile.selectionModel().selectedIndexes()
         if not sel:
             return None
-        item = sel[0].internalPointer()
-        obj = item.obj
-        if isinstance(obj, SignalObject):
-            return obj
+        sig = sel[0].internalPointer().action_signal
+        if isinstance(sig, SignalObject):
+            return sig
         return None
 
     def _rebuild_model(self):
@@ -801,7 +802,7 @@ class MainController(QtCore.QObject):
                 sampling_frequency=1/sig.file.sampling
                 return {'cutoff': self.settings["cutoff_frequency"],
                         'fs': sampling_frequency,
-                        'order': self.settings["filter_order"]
+                        'order': int(self.settings["filter_order"])
                         }
             case custom_types.qSignalType.DIFF:
                 return {'reference':self.workspace.reference_signal}

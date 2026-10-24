@@ -26,6 +26,9 @@ class ThermalModelAnalysis(AnalysisNode):
     """
     Analyse thermique RC (1er ordre) sur un signal temporel.
     """
+    # projection automatique : la courbe modèle est prolongée jusqu'à N_TAU constantes de
+    # temps depuis le début de la plage de fit (5 tau : 99.3 % de l'écart final)
+    N_TAU = 5
     # Réutilise un type existant ou ajoute un nouveau
     action_type = custom_types.qSignalType.MODEL
     PARAMETER_SCHEMA = {
@@ -35,6 +38,13 @@ class ThermalModelAnalysis(AnalysisNode):
                         "limits": ["RC_step"],
                         "key": "model_type",
                 },
+        "Auto projection (5 τ)": {
+                        "type": "bool",
+                        "default": True,
+                        "key": "projection_auto",
+                        "description": "Courbe modèle prolongée jusqu'à 5 tau (asymptote "+
+                                        "atteinte à 99 %). Saisir une durée repasse en manuel"
+                        },
         "Projection duration (s)": {
                         "type": "float",
                         "default": 0.0,
@@ -42,7 +52,7 @@ class ThermalModelAnalysis(AnalysisNode):
                         "suffix": "s",
                         "key": "projection_duration",
                         "description": "Durée de la courbe modèle après la fin de la plage "+
-                                        "de fit (0 = automatique : 3 tau)"
+                                        "de fit (calculée en mode auto)"
                         },
         # [t_start, t_end] des données d'entrée du modèle (None = tout l'enregistrement).
         # Définie à la création par la sélection de plage du graphique, puis éditable
@@ -211,14 +221,15 @@ class ThermalModelAnalysis(AnalysisNode):
         T_inf = self.results.T_inf
 
         t_end = self._x_fitted[-1]
-        projection_duration = self.get_param('projection_duration')
-        if projection_duration > 0:
-            projection = t_end + projection_duration
+        if self.get_param('projection_auto'):
+            projection_duration = max(0.0, self.N_TAU * tau - t_end)
+            # valeur calculée conservée dans les paramètres : affichée dans le
+            # ParameterTree et sauvegardée avec le projet
+            self._params['projection_duration'] = float(projection_duration)
         else:
-            #on utilisera une projection à 3 Tau (soit 95% de la valeur finale)
-            projection = max(t_end * 3, t_end + 3 * tau)
+            projection_duration = self.get_param('projection_duration')
 
-        t_model = np.linspace(0, projection, 500)
+        t_model = np.linspace(0, t_end + projection_duration, 500)
         y_model = thermal_step(t_model, T_inf, tau, T0)
 
         self._x_model = t_model
@@ -242,7 +253,22 @@ class ThermalModelAnalysis(AnalysisNode):
         model_range = params.get('model_range')
         if isinstance(model_range, dict) or model_range == [0, 1200]:
             params['model_range'] = None
+        # avant le mode auto explicite, une durée de projection nulle signifiait « auto »
+        if 'projection_auto' not in params:
+            params['projection_auto'] = not params.get('projection_duration', 0)
         return params
+
+    def clone_with(self, **new_params):
+        """
+        Saisir une durée de projection (différente de la valeur calculée) en mode auto
+        repasse le modèle en projection manuelle.
+        """
+        auto = self.get_param('projection_auto')
+        duration = new_params.get('projection_duration', self.get_param('projection_duration'))
+        if (auto and new_params.get('projection_auto', auto) == auto
+                and duration != self.get_param('projection_duration')):
+            new_params['projection_auto'] = False
+        return super().clone_with(**new_params)
 
     def to_dict(self):
         # "type" + "params" (paramètres d'ENTRÉE) : c'est ce qu'attend AnalysisFactory

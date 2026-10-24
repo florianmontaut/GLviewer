@@ -72,6 +72,8 @@ class TreeController(QtCore.QObject):
         obj.is_selected = True
         if item is None:
             return
+        # actions du menu disponibles selon le signal visé (parent d'un filtre...)
+        self.checkStates(item.action_signal)
         ctx = item.to_selection_context()
         if ctx is None:
             return
@@ -201,6 +203,8 @@ class TreeController(QtCore.QObject):
                                     QtWidgets.QAbstractItemView.ScrollHint.PositionAtCenter
                                 )
         sel_model.blockSignals(False)
+        # sélection faite sans signal Qt : mise à jour des actions du menu
+        self.checkStates(index.internalPointer().action_signal)
 
     def checkStates(self,selected=None):
         if selected is not None:

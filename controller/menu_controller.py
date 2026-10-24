@@ -34,17 +34,28 @@ class MenuController(QtCore.QObject):
             data = json.load(f)
             
         params = data.get("settings",{})
-        
+
+        # réglages absents du fichier utilisateur (première utilisation, nouvelle option) :
+        # valeur par défaut du schéma des options
+        self.params = self._schema_defaults(self.schema)
         if params:
-            self.params = self._deserialize_dict(params)
-        else:
-            #!defaut params!
-            self.params = {}
+            self.params.update(self._deserialize_dict(params))
             
         self.user_config=user_config
 
         self.update_recent_files_menu()
 
+
+    @staticmethod
+    def _schema_defaults(schema: dict) -> dict:
+        """{key: default} de toutes les options d'un schéma (groupes imbriqués compris)."""
+        defaults = {}
+        for spec in schema.values():
+            if spec.get("type") == "group":
+                defaults.update(MenuController._schema_defaults(spec.get("children", {})))
+            elif "key" in spec and "default" in spec:
+                defaults[spec["key"]] = spec["default"]
+        return defaults
 
     def update_recent_files_menu(self):
 

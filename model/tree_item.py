@@ -97,6 +97,17 @@ class TreeItem:
         return signal_item.obj
 
     @property
+    def action_signal(self):
+        """
+        Signal visé par les actions du menu (filtre, analyse, référence...) quand cette
+        ligne est sélectionnée : le signal lui-même, ou le signal parent d'un filtre,
+        d'une analyse ou d'un signal dérivé (qui ne se filtre pas). Permet d'enchaîner
+        les actions sans resélectionner la voie.
+        """
+        sig = self.signal
+        return getattr(sig, "parent_signal", sig)
+
+    @property
     def filter_id(self):
         if not self.is_filter:
             return None
