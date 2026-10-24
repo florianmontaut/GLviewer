@@ -29,6 +29,32 @@ class RelativeTimeAxis(pg.DateAxisItem):
         return labels
 
 
+class AdaptiveAxisItem(pg.AxisItem):
+    """
+    Axe dont l'espacement des graduations choisi par l'utilisateur (setTickSpacing,
+    ex: 10 °C / 2 °C) n'est appliqué que s'il donne un nombre raisonnable de graduations
+    à l'écran ; au-delà (fort dézoom), pyqtgraph choisit un espacement adapté.
+    Un espacement fixe sur une plage immense faisait calculer des millions de graduations
+    (allocation de plusieurs Tio, application figée).
+    """
+    # nombre maximal de graduations principales affichées avec l'espacement utilisateur
+    MAX_TICKS = 50
+
+    def tickSpacing(self, minVal, maxVal, size):
+        levels = self._tickSpacing
+        if levels is not None:
+            major = levels[0][0]
+            if major > 0 and (maxVal - minVal) / major <= self.MAX_TICKS:
+                return levels
+            # espacement automatique de pyqtgraph
+            self._tickSpacing = None
+            try:
+                return super().tickSpacing(minVal, maxVal, size)
+            finally:
+                self._tickSpacing = levels
+        return super().tickSpacing(minVal, maxVal, size)
+
+
 class RangePicker(QtCore.QObject):
     """
     Sélection interactive d'une plage temporelle sur le graphique, avant la création
@@ -225,7 +251,8 @@ class GraphController(QtCore.QObject):
 
     def _init_graph(self):
 
-        self.plot = pg.PlotItem(None,axisItems={"bottom": self.time_axis})
+        self.plot = pg.PlotItem(None,axisItems={"bottom"   : self.time_axis,
+                                                "left"     : AdaptiveAxisItem('left')})
         self.graph.addItem(self.plot)
         if self.opts["downsample"]:
             self.plot.setDownsampling(mode=self.opts["downsample_type"],
@@ -268,7 +295,63 @@ class GraphController(QtCore.QObject):
                                 bounds=(data_min, data_max))
 
     def update_vbox(self):
+        self.update_zoom_limits()
         self.vb.autoRange()
+
+    # ----------------------------------------------------
+    # Limites de zoom
+    # ----------------------------------------------------
+
+    # dézoom maximal : marge autour des courbes visibles, en part de leur étendue
+    # (0.25 de chaque côté : la plage maximale vaut 1.5 fois l'étendue des données)
+    ZOOM_OUT_MARGIN = 0.25
+
+    def update_zoom_limits(self):
+        """
+        Limites de zoom de la ViewBox calculées sur les courbes VISIBLES (voies, filtres,
+        signaux dérivés : différence, projection d'un modèle...). Les voies masquées
+        (ex: HZ) et les annotations n'interviennent pas.
+            - dézoom maximal : étendue des courbes + ZOOM_OUT_MARGIN de chaque côté
+            - zoom maximal   : quelques échantillons en X, 0.01 en Y
+        Sans courbe visible, les limites précédentes sont conservées.
+        """
+        # étendue calculée sur les données elles-mêmes : ViewBox.childrenBounds() ajoute
+        # une marge en pixels, convertie selon le zoom du moment (énorme quand la vue
+        # est encore minuscule, au chargement)
+        visible = [sig for sig, curve in self.curves.items()
+                   if curve.isVisible() and len(sig.x) > 0]
+        bounds = []
+        for sig in visible:
+            x = np.asarray(sig.x, dtype=float)
+            y = np.asarray(sig.y, dtype=float)
+            if np.isfinite(x).any() and np.isfinite(y).any():
+                bounds.append((np.nanmin(x), np.nanmax(x), np.nanmin(y), np.nanmax(y)))
+        if not bounds:
+            return
+        x0 = min(b[0] for b in bounds)
+        x1 = max(b[1] for b in bounds)
+        y0 = min(b[2] for b in bounds)
+        y1 = max(b[3] for b in bounds)
+
+        # pas d'échantillonnage le plus fin des courbes visibles
+        steps = [np.min(np.diff(np.asarray(sig.x[:100], dtype=float)))
+                 for sig in visible if len(sig.x) > 1]
+        steps = [s for s in steps if np.isfinite(s) and s > 0]
+        min_x_range = 10 * min(steps) if steps else 1e-3
+
+        # étendue minimale : une courbe plate (ou un seul point) reste zoomable
+        width_x = max(x1 - x0, min_x_range)
+        width_y = max(y1 - y0, 1.0)
+        margin_x, margin_y = self.ZOOM_OUT_MARGIN * width_x, self.ZOOM_OUT_MARGIN * width_y
+
+        self.vb.setLimits(  xMin        = x0 - margin_x,
+                            xMax        = x1 + margin_x,
+                            yMin        = y0 - margin_y,
+                            yMax        = y1 + margin_y,
+                            minXRange   = min_x_range,
+                            maxXRange   = width_x + 2 * margin_x,
+                            minYRange   = 0.01,
+                            maxYRange   = width_y + 2 * margin_y)
 
     # ----------------------------------------------------
     def add_signal_curve(self, sig: SignalObject|DerivedSignalObject):
@@ -281,6 +364,7 @@ class GraphController(QtCore.QObject):
             curve.sigClicked.connect(self._on_curve_clicked)
             self.plot.addItem(curve)
             self.curves[sig] = curve
+            self.update_zoom_limits()
 
     def _signal_from_curve(self, curve):
         for sig, c in self.curves.items():
@@ -324,7 +408,6 @@ class GraphController(QtCore.QObject):
         """Redessine la courbe après pipeline update."""
         if sig not in self.curves:
             return
-        print(sig.pipeline.items())
         curve = self.curves[sig]
         curve.setData(sig.x, sig.y)
         # la courbe sélectionnée reste mise en évidence
@@ -384,6 +467,7 @@ class GraphController(QtCore.QObject):
             self.plot.removeItem(curve)
             curve.setParentItem(None)
             curve.deleteLater()
+            self.update_zoom_limits()
             #self.plot.removeItem(curve) #crash intempestif lors des undo/redo
 
     def _init_cursor(self):
