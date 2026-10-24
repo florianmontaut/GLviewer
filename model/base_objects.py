@@ -620,6 +620,8 @@ class Workspace:
     def __init__(self):
         self.files = []  # list[FileObject]
         self.reference_signal = None
+        # textes ajoutés sur le graphique : id -> TextAnnotation
+        self.annotations = OrderedDict()
 
     def add_file(self, file_obj):
         self.files.append(file_obj)
@@ -638,7 +640,8 @@ class Workspace:
         return {
                 "version": "1.0",
                 "workspace": {
-                            "files": [f.to_dict() for f in self.files]
+                            "files": [f.to_dict() for f in self.files],
+                            "annotations": [a.to_dict() for a in self.annotations.values()]
                             }
                 }
 

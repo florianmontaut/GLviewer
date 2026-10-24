@@ -301,6 +301,16 @@ class AnchorHandle(QGraphicsEllipseItem):
                 self.owner.update_arrow()
         return super().itemChange(change, value)
 
+    def mousePressEvent(self, ev):
+        self._press_pos = self.pos()
+        super().mousePressEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        super().mouseReleaseEvent(ev)
+        # un seul changement (une étape d'undo) par glissement
+        if self.owner is not None and self.pos() != getattr(self, "_press_pos", self.pos()):
+            self.owner.sigUserChanged.emit(self.owner)
+
 
 
 class pgText(pg.TextItem):
@@ -314,6 +324,11 @@ class pgText(pg.TextItem):
 
     # émis après la suppression du texte (et de sa flèche) du graphique
     sigRemoved = QtCore.pyqtSignal(object)
+    # actions de l'utilisateur, appliquées par le contrôleur (commandes undo/redo) :
+    #   - modification terminée (édition validée, fin du glissement du texte ou du point)
+    #   - demande de suppression (touche Suppr)
+    sigUserChanged      = QtCore.pyqtSignal(object)
+    sigDeleteRequested  = QtCore.pyqtSignal(object)
 
     def __init__(self,plotItem,text=None,anchor_pos=None,*args,**kwargs):
 
@@ -340,6 +355,7 @@ class pgText(pg.TextItem):
         self.lineItem = None
         self.setZValue(10)
         self._removed = False
+        self.annotation_id = None
 
     def keyPressEvent(self, event):
         """
@@ -348,7 +364,7 @@ class pgText(pg.TextItem):
             event (QEvent): entrée clavier
         """
         if event.key() in (QtCore.Qt.Key.Key_Delete, QtCore.Qt.Key.Key_Backspace):
-            self.delete()
+            self.sigDeleteRequested.emit(self)
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -363,7 +379,14 @@ class pgText(pg.TextItem):
         else:
             # le focus permet la suppression au clavier (Suppr)
             self.setFocus()
+            self._press_pos = self.pos()
             ev.accept()
+
+    def mouseReleaseEvent(self, ev):
+        super().mouseReleaseEvent(ev)
+        # un seul changement (une étape d'undo) par glissement
+        if self.pos() != getattr(self, "_press_pos", self.pos()):
+            self.sigUserChanged.emit(self)
 
     def mouseDoubleClickEvent(self,ev):
         """
@@ -373,14 +396,17 @@ class pgText(pg.TextItem):
         """
         if not self.Onflag: #si fenêtre déjà ouverte on sort de la fonction
             self.Onflag=True #mise à 1 du flag éditeur ouvert
-            self.textEditor()
+            self.textEditor(on_done=lambda accepted:
+                                accepted and self.sigUserChanged.emit(self))
             self.Onflag=False #on est sorti de l'éditeur, mise à 0 du flag
         ev.accept()
 
-    def textEditor(self):
+    def textEditor(self, on_done=None):
         """
-        Méthode gérant l'apparition de la fenêtre de modification du texte. Annuler
-        l'édition d'un texte vide (ex: texte venant d'être créé) le supprime.
+        Méthode gérant l'apparition de la fenêtre de modification du texte.
+        Args:
+            on_done (callable(bool)|None): appelé à la fermeture de l'éditeur (True si
+                                           le texte a été validé)
         """
         if self.toPlainText() is not None:
             self.window=TextDialog(text=self.toPlainText(),font=self.font,color=self.color)
@@ -392,11 +418,58 @@ class pgText(pg.TextItem):
             html,self.font,self.color=self.window.getText()
             self.setHtml(html)
             self.update_arrow()
+            if on_done is not None:
+                on_done(True)
         def cancelled():
-            if not self.toPlainText().strip():
-                self.delete()
+            if on_done is not None:
+                on_done(False)
         self.window.accepted.connect(updateText)
         self.window.rejected.connect(cancelled)
+
+    # -----------------------------------------------------
+    # Lien avec le modèle (TextAnnotation)
+    # -----------------------------------------------------
+
+    def to_annotation(self, base):
+        """État affiché, sous forme de TextAnnotation (même id que base)."""
+        anchor = None
+        if self.anchorHandle is not None:
+            anchor = (self.anchorHandle.pos().x(), self.anchorHandle.pos().y())
+        return base.with_changes(
+                        html        = self.textItem.toHtml(),
+                        pos         = (self.pos().x(), self.pos().y()),
+                        anchor_pos  = anchor,
+                        color       = QtGui.QColor(self.color).name(
+                                                QtGui.QColor.NameFormat.HexArgb),
+                        font        = self.font.toString(),
+                        )
+
+    def apply_annotation(self, annotation):
+        """Aligne l'affichage sur une TextAnnotation (création, undo/redo, rechargement)."""
+        self.annotation_id = annotation.id
+        self.color = QtGui.QColor(annotation.color)
+        if annotation.font:
+            self.font = QtGui.QFont()
+            self.font.fromString(annotation.font)
+        self.setColor(self.color)
+        self.setHtml(annotation.html)
+        self.setAnchor((0,1) if annotation.anchor_pos is not None else (0,0))
+        self.setPos(QtCore.QPointF(*annotation.pos))
+
+        self.anchor_pos = annotation.anchor_pos
+        if annotation.anchor_pos is not None:
+            if self.lineItem is None:
+                self.createArrow()
+            else:
+                self.anchorHandle.setPos(QtCore.QPointF(*annotation.anchor_pos))
+            # couleur de la flèche
+            pen = QtGui.QPen(self.color, 1)
+            pen.setCosmetic(True)
+            self.lineItem.setPen(pen)
+            self.arrow.setStyle(pen=pg.mkPen(self.color), brush=self.color)
+            self.anchorHandle.setBrush(QtGui.QBrush(self.color))
+            self.anchorHandle.setPen(QtGui.QPen(self.color))
+        self.update_arrow()
 
     # -----------------------------------------------------
     # Création de la flèche

@@ -19,6 +19,8 @@ from controller.import_controller import ImportController
 from controller.export_controller import ExportController
 from controller.menu_controller import MenuController
 from controller.cursor_controller import CursorController
+from controller.commands.annotations import (AddAnnotationCommand, RemoveAnnotationCommand,
+                                             ModifyAnnotationCommand)
 
 from model.tree_item import TreeItem
 
@@ -176,6 +178,12 @@ class MainController(QtCore.QObject):
         # l'historique undo/redo concerne l'ancien workspace
         self.workspace_ctrl.undo_stack.clear()
         self.graph_ctrl.update_vbox()
+
+        # textes du graphique : ceux de l'ancien workspace sont retirés
+        annotations_view = self.graph_ctrl.graph_tree_ctrl
+        annotations_view.clear_annotations()
+        for annotation in self.workspace.annotations.values():
+            annotations_view.show_annotation(annotation)
 
     def _init_workspace_model(self):
         """
@@ -479,6 +487,24 @@ class MainController(QtCore.QObject):
         self.graph_ctrl.range_picker.accepted.connect(self._on_model_range_accepted)
         self.graph_ctrl.range_picker.cancelled.connect(
                                                 lambda _: self.view.statusBar().clearMessage())
+        # textes du graphique : chaque action de l'utilisateur est une commande undo/redo
+        annotations_view = self.graph_ctrl.graph_tree_ctrl
+        annotations_view.annotation_created.connect(
+            lambda a: self._push_annotation_command(
+                                    AddAnnotationCommand(self.workspace, annotations_view, a)))
+        annotations_view.annotation_changed.connect(
+            lambda old, new: self._push_annotation_command(
+                        ModifyAnnotationCommand(self.workspace, annotations_view, old, new)))
+        annotations_view.annotation_delete_requested.connect(
+            lambda a: self._push_annotation_command(
+                                RemoveAnnotationCommand(self.workspace, annotations_view, a)))
+
+    def _push_annotation_command(self, cmd):
+        """Empile une commande sur un texte (appliquée directement sans fichier chargé)."""
+        if self.workspace_ctrl is None:
+            cmd.redo()
+        else:
+            self.workspace_ctrl.undo_stack.push(cmd)
 
     def _on_model_range_accepted(self, signal, t_start: float, t_end: float):
         """Plage validée sur le graphique : création du modèle thermique."""

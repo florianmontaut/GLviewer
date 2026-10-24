@@ -70,7 +70,7 @@ def test_cancelled_empty_text_is_removed(ctrl, graph):
 
     text.window.reject()
 
-    assert _texts(graph) == [] and graph.graph_tree_ctrl.textItems == []
+    assert _texts(graph) == [] and graph.graph_tree_ctrl.textItems == {}
 
 
 def test_accepted_text_is_kept(ctrl, graph):
@@ -209,7 +209,7 @@ def test_delete_key_removes_annotation(ctrl, graph):
                                        QtCore.Qt.KeyboardModifier.NoModifier))
 
     assert not any(part in graph.plot.items for part in parts)
-    assert graph.graph_tree_ctrl.textItems == []
+    assert graph.graph_tree_ctrl.textItems == {}
     graph.vb.setRange(xRange=(0, 100), padding=0)   # plus de mise à jour de la flèche
 
 

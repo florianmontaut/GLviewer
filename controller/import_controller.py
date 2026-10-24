@@ -7,6 +7,7 @@ from PyQt6 import QtGui,QtCore,QtWidgets
 from ressources import (custom_functions,custom_items,custom_types,
                         custom_dialogs,custom_exceptions)
 from model.base_objects import Workspace,FileObject
+from model.annotations import TextAnnotation
 from model.filters.filter_factory import FilterFactory
 from model.analysis.analysis_factory import AnalysisFactory
 
@@ -593,6 +594,11 @@ class ImportController(QtCore.QObject):
             file_obj = FileObject(file_caracs)
             file_obj.signals_from_dict(file_data, FilterFactory(),AnalysisFactory())
             ws.add_file(file_obj)
+
+        # textes du graphique (absents des projets plus anciens)
+        for annotation_data in data["workspace"].get("annotations", []):
+            annotation = TextAnnotation.from_dict(annotation_data)
+            ws.annotations[annotation.id] = annotation
 
         self._from_project=custom_types.ImportMode.INTERACTIVE
         self.project_signal.emit(ws)

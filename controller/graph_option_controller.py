@@ -7,11 +7,17 @@ from ressources import (custom_dialogs,custom_tree_functions,custom_functions,cu
                         custom_types,custom_struct_functions)
 
 from model.base_objects import SignalObject
+from model.annotations import TextAnnotation
 
 class GraphTreeController(QtCore.QObject):
 
 
     curve_selected          = QtCore.pyqtSignal(SignalObject)
+    # textes du graphique : actions de l'utilisateur, appliquées par le MainController
+    # via des commandes undo/redo (le modèle est workspace.annotations)
+    annotation_created          = QtCore.pyqtSignal(object)            # TextAnnotation
+    annotation_changed          = QtCore.pyqtSignal(object, object)    # ancienne, nouvelle
+    annotation_delete_requested = QtCore.pyqtSignal(object)            # TextAnnotation
     #menu_actions_triggered  = QtCore.pyqtSignal((custom_types.ActionModifier,
     #                                             custom_types.qSignalType))
 
@@ -83,7 +89,9 @@ class GraphTreeController(QtCore.QObject):
         super().__init__()
         self.graphPlot=plot
         self.graphTree=tree
-        self.textItems=[]
+        # textes affichés : id -> pgText, et état affiché correspondant : id -> TextAnnotation
+        self.textItems={}
+        self._annotations={}
         self.parameter_roots={}
         self.opts_dict=custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
 
@@ -205,7 +213,8 @@ class GraphTreeController(QtCore.QObject):
 
     def addText(self, pos, anchor_pos=None, text=None, color=None, edit=True):
         """
-        Ajoute un texte sur le graphique.
+        Crée un texte sur le graphique. Il n'est ajouté au modèle (annotation_created,
+        une étape d'undo) qu'à la fermeture de l'éditeur ; un texte laissé vide est retiré.
 
         Args:
             pos         (tuple(float,float))        : position du texte (coordonnées des données)
@@ -219,36 +228,92 @@ class GraphTreeController(QtCore.QObject):
             pgText: le texte créé
         """
         if text is None:
-            if      self.mouseCursor.param('show X value').value() or \
-                    self.mouseCursor.param('show Y value').value():
+            if      self.mouseCursor.param('show X value').value() or                     self.mouseCursor.param('show Y value').value():
                 text=self.mouseCursor.valtext.toPlainText()
             else:
                 text=""
         if color is None:
             color = QtGui.QColor("black")
 
-        text_item = custom_dialogs.pgText(
-                                        plotItem=self.graphPlot,
-                                        text=text,
-                                        color=color,
-                                        anchor_pos=anchor_pos,
-                                        # annotation : le texte est placé au-dessus à droite
-                                        # du point (coin bas-gauche du texte sur pos)
-                                        anchor=(0,1) if anchor_pos is not None else (0,0)
-                                        )
+        draft = TextAnnotation( html        = "",
+                                pos         = tuple(pos),
+                                anchor_pos  = None if anchor_pos is None else tuple(anchor_pos),
+                                color       = QtGui.QColor(color).name(
+                                                    QtGui.QColor.NameFormat.HexArgb))
+        text_item = self._create_item(draft)
+        text_item.apply_annotation(draft)
+        text_item.setText(text)
+        text_item.annotation_id = None      # pas encore dans le modèle
 
-        self.graphPlot.addItem(text_item, ignoreBounds=True)
-        text_item.setPos(QtCore.QPointF(*pos))
-        text_item.createArrow()
-        text_item.sigRemoved.connect(self._on_text_removed)
-        self.textItems.append(text_item)
         if edit:
-            text_item.textEditor()
+            text_item.textEditor(on_done=lambda accepted:
+                                    self._finish_creation(text_item, draft))
+        else:
+            self._finish_creation(text_item, draft)
         return text_item
 
+    def _finish_creation(self, text_item, draft):
+        if not text_item.toPlainText().strip():
+            text_item.delete()
+            return
+        annotation = text_item.to_annotation(draft)
+        self.textItems[annotation.id] = text_item
+        self._annotations[annotation.id] = annotation
+        text_item.annotation_id = annotation.id
+        self.annotation_created.emit(annotation)
+
+    def _create_item(self, annotation):
+        text_item = custom_dialogs.pgText(  plotItem=self.graphPlot,
+                                            color=QtGui.QColor(annotation.color))
+        self.graphPlot.addItem(text_item, ignoreBounds=True)
+        text_item.sigUserChanged.connect(self._on_user_changed)
+        text_item.sigDeleteRequested.connect(self._on_delete_requested)
+        text_item.sigRemoved.connect(self._on_text_removed)
+        return text_item
+
+    # ---------------- mise à jour de la vue (commandes undo/redo) ----------------
+
+    def show_annotation(self, annotation):
+        """Affiche une TextAnnotation, ou met à jour le texte existant de même id."""
+        text_item = self.textItems.get(annotation.id)
+        if text_item is None:
+            text_item = self._create_item(annotation)
+            self.textItems[annotation.id] = text_item
+        text_item.apply_annotation(annotation)
+        self._annotations[annotation.id] = annotation
+
+    def remove_annotation(self, annotation_id):
+        self._annotations.pop(annotation_id, None)
+        text_item = self.textItems.pop(annotation_id, None)
+        if text_item is not None:
+            text_item.delete()
+
+    def clear_annotations(self):
+        for annotation_id in list(self.textItems):
+            self.remove_annotation(annotation_id)
+
+    # ---------------- actions de l'utilisateur ----------------
+
+    def _on_user_changed(self, text_item):
+        old = self._annotations.get(text_item.annotation_id)
+        if old is None:
+            # texte en cours de création : pris en compte à la fermeture de l'éditeur
+            return
+        new = text_item.to_annotation(old)
+        if new != old:
+            self.annotation_changed.emit(old, new)
+
+    def _on_delete_requested(self, text_item):
+        annotation = self._annotations.get(text_item.annotation_id)
+        if annotation is None:
+            text_item.delete()
+        else:
+            self.annotation_delete_requested.emit(annotation)
+
     def _on_text_removed(self, text_item):
-        if text_item in self.textItems:
-            self.textItems.remove(text_item)
+        if self.textItems.get(text_item.annotation_id) is text_item:
+            self.textItems.pop(text_item.annotation_id)
+            self._annotations.pop(text_item.annotation_id, None)
 
     def update_settings(self,new_settings):
 
