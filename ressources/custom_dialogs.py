@@ -9,7 +9,7 @@ import numpy as np
 from PyQt6.QtWidgets import (QFontDialog,QDialog,QColorDialog,QTabWidget,QGraphicsLineItem,
                             QGraphicsItem,QWidget,QTableWidget,QLineEdit,QCheckBox,QSpinBox,
                             QDoubleSpinBox,QGridLayout,QDialogButtonBox,QTableWidgetItem,
-                            QGraphicsEllipseItem,QFormLayout,QLabel)
+                            QGraphicsEllipseItem,QFormLayout,QLabel,QSplitter,QVBoxLayout)
 from PyQt6.uic import loadUi
 from PyQt6 import QtGui,QtCore
 from ressources import custom_struct_functions
@@ -19,6 +19,7 @@ import pyqtgraph as pg
 
 from model.analysis import analysis_factory
 from model.filters import filter_factory
+from model import txt_import
 
 
 PATH=pathlib.Path(__file__).parent
@@ -645,14 +646,21 @@ class ImportWizardDialog(QDialog):
     params_ready = QtCore.pyqtSignal(dict)
     HIGHLIGHT_BRUSH = QtGui.QBrush(QtGui.QColor(220, 235, 255))  # bleu clair
     DEFAULT_BRUSH = QtGui.QBrush(QtCore.Qt.GlobalColor.white)
+    # nombre maximal de lignes lues et de voies tracées pour l'aperçu graphique
+    PREVIEW_ROWS = 5000
+    PREVIEW_CHANNELS = 40
 
-    def __init__(self, adress, delimitor:str=';',unitDelim:str=",",*args,**kwargs) :
+    def __init__(self, adress, delimitor:str=';',unitDelim:str=",",
+                 default_sampling:float=1.0,*args,**kwargs) :
 
         QDialog.__init__(self,*args,**kwargs)
         self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
         #Load the UI Page
         loadUi(PATH/"importTxtDialog.ui",self)
         self.rawfile=adress
+        # pas utilisé quand le temps n'est pas dans le fichier (même valeur qu'à l'import)
+        self.default_sampling=default_sampling
+        self._init_preview()
         self.DelimitorEdit : QLineEdit
         self.UnitEdit : QLineEdit
         self.NameBox : QCheckBox
@@ -669,6 +677,7 @@ class ImportWizardDialog(QDialog):
         #En forçant l'argument init=True, on passe le test de changement des délimiteurs
         #dans la méthode newImportConfig
         self.NameBox.toggled.connect(lambda: self.newImportConfig(True))
+        self.TimeBox.toggled.connect(self.update_preview)
         self.delimitor=delimitor
         self.unitDelim=unitDelim
 
@@ -720,20 +729,28 @@ class ImportWizardDialog(QDialog):
             self.unitDelim=newUnit
             self.UnitEdit.setPlaceholderText(newUnit)
 
-        with open(self.rawfile,encoding="utf-8-sig") as f :
+        try:
+            with open(self.rawfile,encoding="utf-8-sig") as f :
 
-            rawtxt = csv.reader(f, delimiter=self.delimitor)
-            for n,line in enumerate(rawtxt):
-                if n>49:
-                    break
-                try:
-                    outTxt.append(  [float(element.replace(self.unitDelim,'.'))
-                                    for element in line])
-                except:
-                    outTxt.append(line)
-                    continue
+                rawtxt = csv.reader(f, delimiter=self.delimitor)
+                for n,line in enumerate(rawtxt):
+                    if n>49:
+                        break
+                    try:
+                        outTxt.append(  [float(element.replace(self.unitDelim,'.'))
+                                        for element in line])
+                    except:
+                        outTxt.append(line)
+                        continue
+        except TypeError:
+            # séparateur invalide (vide, plusieurs caractères...)
+            self.show_preview_message(f"Séparateur des colonnes invalide : '{self.delimitor}'")
+            return
+        except (csv.Error, UnicodeDecodeError) as e:
+            self.show_preview_message(f"Fichier illisible comme texte :\n{e}")
+            return
 
-            self.populate_table(outTxt)
+        self.populate_table(outTxt)
 
     def collect_params(self) -> list:
         """
@@ -751,10 +768,12 @@ class ImportWizardDialog(QDialog):
         allColumns=set(range(1,self.n_cols+1))
         ignoredColumns=allColumns-self.selected_cols
         ignoredColumns=[val-1 for val in ignoredColumns]
+        # aucune ligne cochée : rien à importer
+        start = sorted(self.selected_rows)[0]-1 if self.selected_rows else None
 
         return {'delim'           : self.delimitor,
                 'unitdelim'       : self.unitDelim,
-                'start'           : sorted(self.selected_rows)[0]-1,
+                'start'           : start,
                 'columns'         : ignoredColumns,
                 'sigNames'        : True if  self.NameBox.checkState()
                                             == QtCore.Qt.CheckState.Checked else False,
@@ -806,8 +825,9 @@ class ImportWizardDialog(QDialog):
             chkBoxItem.setFlags(QtCore.Qt.ItemFlag.ItemIsUserCheckable |
                                 QtCore.Qt.ItemFlag.ItemIsEnabled)
             chkBoxItem.setCheckState(QtCore.Qt.CheckState.Checked)
-            if names is not None:
-                chkBoxItem.setText(names.pop(0))
+            # « noms » d'une première ligne numérique : convertis en float par la lecture
+            if names:
+                chkBoxItem.setText(str(names.pop(0)))
             else:
                 chkBoxItem.setText("")
             self.importTable.setItem(0,j,chkBoxItem)
@@ -898,6 +918,99 @@ class ImportWizardDialog(QDialog):
                     item.setBackground(self.HIGHLIGHT_BRUSH)
                 else:
                     item.setBackground(self.DEFAULT_BRUSH)
+        self.update_preview()
+
+    # -------------------------
+    # Aperçu graphique
+    # -------------------------
+    def _init_preview(self):
+        """Graphe d'aperçu à droite du tableau (séparateur redimensionnable)."""
+        self.preview = pg.PlotWidget(background='w')
+        self.preview.showGrid(x=True, y=True, alpha=0.3)
+        self.preview.setLabel('bottom', 'Temps', units='s')
+        self.preview_legend = self.preview.addLegend(offset=(10, 10))
+        self.preview_label = QLabel()
+        self.preview_label.setWordWrap(True)
+        self.preview_message = pg.TextItem(anchor=(0.5, 0.5), color=(120, 120, 120))
+        self.preview_curves = []
+
+        panel = QWidget()
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.addWidget(self.preview_label)
+        panel_layout.addWidget(self.preview)
+
+        layout = self.layout()
+        layout.removeWidget(self.importTable)
+        splitter = QSplitter(QtCore.Qt.Orientation.Horizontal)
+        splitter.addWidget(self.importTable)
+        splitter.addWidget(panel)
+        splitter.setSizes([550, 450])
+        layout.addWidget(splitter, 0, 0, 1, 2)
+        self.resize(max(self.width(), 1100), max(self.height(), 600))
+
+    def _set_ok_enabled(self, enabled: bool):
+        ok = self.buttonBox.button(QDialogButtonBox.StandardButton.Ok)
+        if ok is not None:
+            ok.setEnabled(enabled)
+
+    def _clear_preview(self):
+        self.preview.clear()            # courbes et message
+        self.preview_legend.clear()
+        self.preview_curves = []
+
+    def show_preview_message(self, message: str):
+        """Aucune courbe affichable : message au centre du graphe, validation impossible."""
+        self._clear_preview()
+        self._set_ok_enabled(False)
+        self.preview_label.setText("Aperçu indisponible")
+        self.preview_message.setText(message)
+        self.preview.addItem(self.preview_message, ignoreBounds=True)
+        self.preview.setRange(xRange=(-1, 1), yRange=(-1, 1), padding=0)
+        self.preview_message.setPos(0, 0)
+
+    def update_preview(self, *_):
+        """
+        Aperçu du chargement avec les réglages actuels : même découpage que l'import
+        (model.txt_import.parse_txt), limité aux PREVIEW_ROWS premières lignes.
+        """
+        try:
+            result = txt_import.parse_txt(  self.rawfile,
+                                            self.collect_params(),
+                                            self.default_sampling,
+                                            max_rows=self.PREVIEW_ROWS)
+        except Exception as e:
+            self.show_preview_message(f"Chargement impossible avec ces réglages :\n{e}")
+            return
+
+        plotted = [ name for name in result.channels
+                    if np.isfinite(result.data[name].to_numpy()).any()]
+        if not plotted:
+            self.show_preview_message("Aucune voie numérique à afficher")
+            return
+
+        self._clear_preview()
+        self._set_ok_enabled(True)
+        colors = pg.colormap.getFromMatplotlib('tab20').getLookupTable(0, 1, 20)
+        time = result.data['Time'].to_numpy()
+        for n, name in enumerate(plotted[:self.PREVIEW_CHANNELS]):
+            curve = self.preview.plot(  time, result.data[name].to_numpy(),
+                                        pen=pg.mkPen(colors[n % 20], width=1),
+                                        name=name, connect='finite')
+            self.preview_curves.append(curve)
+        self.preview.enableAutoRange()
+
+        summary = f"Aperçu : {len(plotted)} voie(s), {len(time)} point(s)"
+        if len(time) >= self.PREVIEW_ROWS:
+            summary += f" ({self.PREVIEW_ROWS} premières lignes)"
+        if len(plotted) > self.PREVIEW_CHANNELS:
+            summary += f", {self.PREVIEW_CHANNELS} premières voies tracées"
+        if result.invalid_cells:
+            summary += f", {result.invalid_cells} cellule(s) non numérique(s) ignorée(s)"
+        empty = len(result.channels) - len(plotted)
+        if empty:
+            summary += f", {empty} voie(s) sans valeur numérique"
+        self.preview_label.setText(summary)
 
     def accept(self):
         params = self.collect_params()

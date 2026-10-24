@@ -93,6 +93,7 @@ class FileObject:
         self.id = uuid.uuid4().hex
 
         self.signals = []   # Liste de SignalObject
+        self._raw_x = None  # cache de l'axe des temps (voir get_raw_x)
         self.is_selected = False
         self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
         self.colormap = pg.colormap.getFromMatplotlib('tab20')
@@ -111,6 +112,7 @@ class FileObject:
         if time is not None:
             if  time != self.offset:
                 self.offset = time
+                self._raw_x = None
                 if isinstance(self.data.index, pd.MultiIndex):
                     #on retire l'index time existant
                     self.data = self.data.reset_index(level = 1,drop = True)
@@ -232,12 +234,21 @@ class FileObject:
         self.resolve_filter_references()
 
     def get_raw_y(self,name):
-        """Vraies données brutes."""
-        return np.array(self.data[name].values.tolist())
+        """Vraies données brutes (copie)."""
+        return self.data[name].to_numpy(dtype=float, copy=True)
 
     def get_raw_x(self):
-        """Vraies données brutes."""
-        return np.array(self.data.index.get_level_values(1).values.tolist())
+        """
+        Axe des temps, commun à tous les signaux du fichier. Mis en cache (recalculé après
+        un changement de décalage, voir set_offset) et en lecture seule : sig.x est lu à
+        chaque mise à jour du graphique, des limites de zoom... (1 million de points pour
+        un .txt de NTC à 1 Hz).
+        """
+        if self._raw_x is None:
+            x = self.data.index.get_level_values(1).to_numpy(dtype=float, copy=True)
+            x.setflags(write=False)
+            self._raw_x = x
+        return self._raw_x
 
 class SignalObject:
     """

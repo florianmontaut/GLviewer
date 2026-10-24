@@ -254,6 +254,10 @@ class GraphController(QtCore.QObject):
         self.plot = pg.PlotItem(None,axisItems={"bottom"   : self.time_axis,
                                                 "left"     : AdaptiveAxisItem('left')})
         self.graph.addItem(self.plot)
+        # seuls les points visibles (plus une marge) sont décimés et dessinés : sans cela,
+        # zoomer réduit la décimation sur TOUTE la courbe (1 million de points redessinés
+        # pour un fichier .txt de NTC enregistré à 1 Hz)
+        self.plot.setClipToView(True)
         if self.opts["downsample"]:
             self.plot.setDownsampling(mode=self.opts["downsample_type"],
                                             ds=self.opts["downsample_ratio"])

@@ -8,6 +8,7 @@ from ressources import (custom_functions,custom_items,custom_types,
                         custom_dialogs,custom_exceptions)
 from model.base_objects import Workspace,FileObject
 from model.annotations import TextAnnotation
+from model import txt_import
 from model.filters.filter_factory import FilterFactory
 from model.analysis.analysis_factory import AnalysisFactory
 
@@ -34,7 +35,7 @@ class ImportController(QtCore.QObject):
                             custom_items.ImportRequest(
                                                     file_format=custom_types.fileType.TXT,
                                                     loader_label=("Loading .txt files",
-                                                                "txt Files (*.txt),csv Files (*.csv)"),
+                                                                "txt Files (*.txt);;csv Files (*.csv)"),
                                                     loader= self.openTxt
                                                     ),
                             custom_types.fileType.CSV:
@@ -287,7 +288,7 @@ class ImportController(QtCore.QObject):
             unitDelim   = None
         else:
             delim       = params.get('delim',None)
-            unitDelim   = params.get('unitDelim',None)
+            unitDelim   = params.get('unitdelim',None)
             
         if delim is None:
             delim = self.opts["default_delimitor"]
@@ -297,7 +298,9 @@ class ImportController(QtCore.QObject):
         userInput = custom_dialogs.ImportWizardDialog(
                                                         adress=adress,
                                                         delimitor=delim,
-                                                        unitDelim=unitDelim
+                                                        unitDelim=unitDelim,
+                                                        default_sampling=
+                                                            self.opts["default_sampling_txt"]
                                                     )
         userInput.params_ready.connect(self._get_import_settings)
 
@@ -398,88 +401,56 @@ class ImportController(QtCore.QObject):
 
     def openTxt(self,fname,settings=None):
         """
-        Méthode permettant de charger un fichier .txt (exemple enregistrement des NTCs via matis)
+        Méthode permettant de charger un fichier .txt (exemple enregistrement des NTCs via matis).
+        Le découpage (model.txt_import.parse_txt) est le même que celui de l'aperçu de
+        l'import wizard.
         Arguments:
-                None   --
+                fname       --  adresse du fichier
+                settings    --  réglages de l'import wizard (None : détection du séparateur,
+                                noms des voies en première ligne)
         Returns:
                 None   --
         """
-        file_caracs=self.file_caracs
         default_settings={
-                    'delim'             :';,\t',
+                    'delim'             : txt_import.DEFAULT_DELIMITERS,
                     'unitdelim'         : '.',
                     'start'             : 0,
                     'columns'           : [],
                     'sigNames'          : True,
                     'isFirstColIndex'   : False,
                 }
-        with open(fname,encoding="utf-8-sig") as csvfile:
+        # premier chargement direct : découpage strict, en cas de doute le wizard s'ouvre
+        strict = settings is None
+        if settings is None:
+            settings = default_settings
 
-            if settings is None:
-                settings = default_settings
+        try:
+            result = txt_import.parse_txt(fname, settings, self.opts["default_sampling_txt"],
+                                          strict=strict)
+        except (custom_exceptions.TxtDelimiterError, custom_exceptions.TxtFormatError):
+            raise
+        except Exception as e:
+            raise custom_exceptions.TxtDelimiterError(f"Failed to load TXT file {fname}"
+                                                        ) from e
 
-            dialect = csv.Sniffer().sniff(csvfile.read(4096), delimiters=settings['delim'])
-            csvfile.seek(0)
-            rawtxt = list(csv.reader(csvfile, dialect))
-            n_points = len(rawtxt) - 1 if settings['sigNames'] else 0
-            start_time = self.opts["default_time"]
-            channels = []
-            check_table = []
-            #si la première ligne correspond au noms des signaux on les récupères
-            if settings['sigNames']:
-                for n,val in enumerate(rawtxt.pop(0)):
-                    if val and n not in settings['columns'] :
-                        channels.append(val)
-            #sinon on en créé
-            else:
-                for n in range(len(rawtxt[0])):
-                    channels.append(f'channel{n}')
-            data=[]
-            #print(f'File delim: {settings["delim"]} / Unit delim: {settings["unitdelim"]}')
-            try:
-                for line in rawtxt[settings['start']:]:
-                    values=[float(val.replace(settings['unitdelim'],'.'))
-                            for n,val in enumerate(line) if n not in settings['columns']]
-                    data.append(values)
-            except Exception as e:
+        df = result.data
+        # pas de détection des voies HZ : les données d'un .txt (puissance, tension...)
+        # n'ont pas de plage connue, elles sont toutes affichées
+        data=df.set_index('Time',append=True)
 
-                raise custom_exceptions.TxtDelimiterError(f"Failed to load TXT file {fname}"
-                                                            ) from e
-
-            df=pd.DataFrame(data,columns=channels)
-            for signal in channels:
-                df[signal]=pd.to_numeric(df[signal],errors='coerce')
-                # TODO: channels span: faut-il vérifier la validité des données
-                # sur un fichier csv?
-                channels_span=(200,-20 )
-                check_table.append(self.isChannelValid( df[signal],
-                                                        channels_span,
-                                                        active=self.opts["remove_overrange"]))
-            if not settings['isFirstColIndex']:
-                sampling=self.opts["default_sampling_txt"]
-                df.insert(  loc=0,
-                            column='Time',
-                            value=np.linspace(0,(n_points-1)*sampling,n_points))
-            else:
-                sampling=df.iat[1,0]-df.iat[0,0]
-            data=df.set_index(df.columns[0],append=True)
-
-            file_caracs=custom_items.FileStruct(
-                                                address         = fname,
-                                                file_type       = custom_types.fileType.TXT.name,
-                                                sampling        = sampling,
-                                                n_samples       = n_points,
-                                                recordDate      = start_time,
-                                                import_params   = settings,
-                                                data            = data,
-                                            )
-            if self._from_project == custom_types.ImportMode.INTERACTIVE:
-                self.send_file_to_workspace(file_caracs)
-            else:
-                return file_caracs
-            #self._model.MAJ_files.emit()
-            #Emit réalisé dans le model à la fin de la méthode newFile pour
-            #éviter tout problème de synchro
+        file_caracs=custom_items.FileStruct(
+                                            address         = fname,
+                                            file_type       = custom_types.fileType.TXT.name,
+                                            sampling        = result.sampling,
+                                            n_samples       = len(df),
+                                            recordDate      = self.opts["default_time"],
+                                            import_params   = settings,
+                                            data            = data,
+                                        )
+        if self._from_project == custom_types.ImportMode.INTERACTIVE:
+            self.send_file_to_workspace(file_caracs)
+        else:
+            return file_caracs
 
     def send_file_to_workspace(self,file_caracs:custom_items.FileStruct):
 
@@ -617,7 +588,7 @@ class ImportController(QtCore.QObject):
                                                         settings=file_data['import_params'])
                     break
                 except custom_exceptions.TxtDelimiterError  as e:
-                    QtWidgets.QMessageBox.warning(self,
+                    QtWidgets.QMessageBox.warning(self.view,
                                         "Séparateur des colonnes invalide",
                                         str(e)+
                                         '\n Veuillez vérifier le type de séparaterur utilisé.')
@@ -628,7 +599,7 @@ class ImportController(QtCore.QObject):
                         )
                     break
                 except custom_exceptions.TxtFormatError  as e:
-                    QtWidgets.QMessageBox.warning(self,
+                    QtWidgets.QMessageBox.warning(self.view,
                                         "Format invalide",
                                         str(e)+'\n Veuillez vérifier le format du fichier.')
                     file_caracs = self.ImportWizard(file_data['address'])
@@ -674,22 +645,22 @@ class ImportController(QtCore.QObject):
             self.view.statusbar.showMessage(message,3000)
             import_request.loader(fname=fname,settings=params)
         except custom_exceptions.TxtDelimiterError  as e:
-            QtWidgets.QMessageBox.warning(self,
+            QtWidgets.QMessageBox.warning(self.view,
                                 "Séparateur des colonnes invalide",
                                 str(e)+'\n Veuillez vérifier le type de séparaterur utilisé.')
             self.ImportWizard(fname,params)
         except custom_exceptions.TxtFormatError  as e:
-            QtWidgets.QMessageBox.warning(self,
+            QtWidgets.QMessageBox.warning(self.view,
                                 "Format invalide",
                                 str(e)+'\n Veuillez vérifier le format du fichier.')
             self.ImportWizard(fname,params)
         except custom_exceptions.CsvStructureError  as e:
-            QtWidgets.QMessageBox.warning(self,
+            QtWidgets.QMessageBox.warning(self.view,
                                 "Structure de donnée invalide",
                                 str(e)+'\n Veuillez vérifier la structure du fichier CSV.')
             self.ImportWizard(fname,params)
         except custom_exceptions.GLStructureError  as e:
-            QtWidgets.QMessageBox.warning(self,
+            QtWidgets.QMessageBox.warning(self.view,
                                 "Structure de donnée invalide",
                                 str(e)+'\n Veuillez vérifier la structure du fichier GL.')
             self.ImportWizard(fname,params)
