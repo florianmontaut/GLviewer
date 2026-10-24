@@ -63,7 +63,7 @@ class DiffSignalAnalysis(AnalysisNode):
     def input_key(self, parent_signal) -> tuple:
         # la différence est aussi périmée quand le signal de référence change
         ref = self.get_param("reference")
-        ref_key = ref.input_key() if isinstance(ref, SignalObject) else None
+        ref_key = (ref.input_key(), ref.file.removed) if isinstance(ref, SignalObject) else None
         return (parent_signal.input_key(), ref_key)
 
     def resolve_reference(self, signal_map: dict):
@@ -83,6 +83,8 @@ class DiffSignalAnalysis(AnalysisNode):
         self._params['reference_file'] = ref_signal.file.name if ref_signal else None
         if ref_signal is None:
             raise RuntimeError("Reference signal not resolved")
+        if ref_signal.file.removed:
+            raise RuntimeError(f"le fichier de la référence ({ref_signal.file.name}) a été retiré")
 
         # Récupération des données calculées
         t_a, y_a = parent_signal.x, parent_signal.y

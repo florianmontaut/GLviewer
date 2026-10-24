@@ -68,16 +68,18 @@ class PipelineTreeModel(QAbstractItemModel):
 
     # ----------------- Build file subtree -----------------
 
-    def add_file_subtree(self, file_obj: FileObject):
+    def add_file_subtree(self, file_obj: FileObject, row: int | None = None):
         """
-        Ajoute un FileObject au modèle et notifie Qt correctement.
+        Ajoute un FileObject au modèle (en fin de liste, ou à la position row : fichier
+        remis par un undo) et notifie Qt correctement.
         """
         root_index = QModelIndex()
-        row = self.root.child_count()  # position d'insertion
+        if row is None or row > self.root.child_count():
+            row = self.root.child_count()  # position d'insertion
 
         self.beginInsertRows(root_index, row, row)
         file_item = TreeItem(file_obj, parent = self.root)
-        self.root.add_child(file_item)
+        self.root.insert_child(row, file_item)
 
         # Ajouter les signaux
         for sig in file_obj.signals:
@@ -206,6 +208,13 @@ class PipelineTreeModel(QAbstractItemModel):
                 return f"{obj.display_name} ⚠"
             if role == Qt.ItemDataRole.ToolTipRole:
                 return f"Analyse non recalculée : {obj.error}"
+
+        # fichier : nom + point de fonctionnement, chemin en infobulle
+        if obj_type == itemType.FILE:
+            if role == Qt.ItemDataRole.DisplayRole and col == 0:
+                return f"{obj.name} — {obj.label}" if obj.label else obj.name
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return obj.address
 
         if role == Qt.ItemDataRole.DisplayRole and col == 0:
             if obj_type in (itemType.ANALYSE, itemType.FILTER):
@@ -400,6 +409,15 @@ class PipelineTreeModel(QAbstractItemModel):
             for ds in derived:
                 item.add_child(TreeItem(ds, parent = item))
             self.endInsertRows()
+
+    def refresh_object(self, obj):
+        """Libellé d'un élément modifié (ex: étiquette d'un fichier)."""
+        item = self.find_item(self.root, obj)
+        if item is None:
+            return
+        index = self.index_from_item(item)
+        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole,
+                                             Qt.ItemDataRole.ToolTipRole])
 
     def update_derived(self, sig: SignalObject, analysis):
         """

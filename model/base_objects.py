@@ -40,6 +40,13 @@ class FileObject:
                                             "readonly": True,
                                             "key": "name"
                                         },
+                        # point de fonctionnement de l'essai (ex: « 100 W / 55 °C »)
+                        'Label'        :{
+                                            'type':'str',
+                                            'default':"",
+                                            "readonly": False,
+                                            "key": "label"
+                                        },
                         'File editor' :{
                                             'type': 'group',
                                             'expanded':True,
@@ -92,6 +99,9 @@ class FileObject:
         self.offset         :   int
         self.id = uuid.uuid4().hex
 
+        self.label = getattr(self, "label", "")    # point de fonctionnement de l'essai
+        # fichier retiré de l'espace de travail (conservé pour l'undo)
+        self.removed = False
         self.signals = []   # Liste de SignalObject
         self._raw_x = None  # cache de l'axe des temps (voir get_raw_x)
         self._window = None # cache de la fenêtre de troncature (voir window)
@@ -246,7 +256,8 @@ class FileObject:
     def get_file_loader_params(self):
         
         # paramètres du fichier (ParameterTree) : décalage temporel et troncatures
-        arg_to_export= ['file_type','import_params','address','offset','start_x','stop_x']
+        arg_to_export= ['file_type','import_params','address','offset','start_x','stop_x',
+                        'label']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         
         return obj_params

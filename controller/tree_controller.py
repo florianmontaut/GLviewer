@@ -37,6 +37,11 @@ class TreeController(QtCore.QObject):
         self.reference_sig = None
         #self.tree.header().hide()
         self._init_tree_menu()
+        # touche Suppr dans l'arbre : comme « Delete selection »
+        self.delete_shortcut = QtGui.QShortcut(QtGui.QKeySequence.StandardKey.Delete, self.tree)
+        self.delete_shortcut.setContext(QtCore.Qt.ShortcutContext.WidgetShortcut)
+        self.delete_shortcut.activated.connect(
+                                    lambda: self.actions_forwarding(custom_types.qSignalType.DEL))
 
 
     # ----------------------------------------------------------
@@ -73,7 +78,7 @@ class TreeController(QtCore.QObject):
         if item is None:
             return
         # actions du menu disponibles selon le signal visé (parent d'un filtre...)
-        self.checkStates(item.action_signal)
+        self.checkStates(item.action_signal, self._is_deletable(item))
         ctx = item.to_selection_context()
         if ctx is None:
             return
@@ -204,9 +209,16 @@ class TreeController(QtCore.QObject):
                                 )
         sel_model.blockSignals(False)
         # sélection faite sans signal Qt : mise à jour des actions du menu
-        self.checkStates(index.internalPointer().action_signal)
+        item = index.internalPointer()
+        self.checkStates(item.action_signal, self._is_deletable(item))
 
-    def checkStates(self,selected=None):
+    @staticmethod
+    def _is_deletable(item) -> bool:
+        """Fichier, filtre ou analyse : supprimables depuis l'arbre."""
+        return item is not None and item.item_type in (itemType.FILE, itemType.FILTER,
+                                                       itemType.ANALYSE)
+
+    def checkStates(self,selected=None,deletable=False):
         if selected is not None:
 
             #? faut-il vraiment interdire l'accès aux actions si un filtre est sélectionné
@@ -224,6 +236,7 @@ class TreeController(QtCore.QObject):
                                     has_selection = has_select ,
                                     has_reference = has_ref,
                                     is_recording  = self.macro_recording,
+                                    can_delete    = deletable,
                                     )
         self.menu.update_enabled_states(states)
 

@@ -8,6 +8,8 @@ class SelectionState:
     has_selection: bool
     has_reference: bool
     is_recording: bool
+    # élément supprimable sélectionné dans l'arbre : fichier, filtre ou analyse
+    can_delete: bool = False
 
 
 @dataclass(frozen=True)
@@ -65,7 +67,7 @@ class BaseContextMenu(QtCore.QObject):
                                         ),
                     qSignalType.DEL : ActionSpec(
                                         label="Delete selection",
-                                        enabled_if= lambda s: s.has_selection
+                                        enabled_if= lambda s: s.can_delete
                                         ),
                     qSignalType.TEXT : ActionSpec(
                                         label="Add text",

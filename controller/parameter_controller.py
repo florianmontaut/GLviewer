@@ -124,6 +124,18 @@ class ParameterController(QObject):
         self.widget.header().setSectionResizeMode(0,QHeaderView.ResizeMode.Stretch)
 
 
+    def clear(self):
+        """Plus rien à afficher (ex: fichier retiré)."""
+        self._clear_param_tree()
+        self.param = None
+        self._signal = None
+        self.widget.clear()
+
+    def shows(self, file_obj) -> bool:
+        """Les paramètres affichés concernent-ils ce fichier (ou l'une de ses voies) ?"""
+        sig = getattr(self, "_signal", None)
+        return sig is file_obj or getattr(sig, "file", None) is file_obj
+
     @staticmethod
     def _linked_cursors(param):
         """LinkedCursors présents dans un arbre de paramètres."""

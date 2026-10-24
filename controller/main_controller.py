@@ -5,7 +5,7 @@ from operator import index
 
 import pandas as pd
 import pyqtgraph as pg
-from PyQt6 import QtCore,QtGui
+from PyQt6 import QtCore,QtGui,QtWidgets
 
 from model.base_objects import (DerivedSignalObject, FileObject, SignalObject,
                                 Workspace,)
@@ -21,6 +21,7 @@ from controller.menu_controller import MenuController
 from controller.cursor_controller import CursorController
 from controller.commands.annotations import (AddAnnotationCommand, RemoveAnnotationCommand,
                                              ModifyAnnotationCommand)
+from controller.commands.remove_file import RemoveFileCommand
 
 from model.tree_item import TreeItem
 
@@ -435,34 +436,129 @@ class MainController(QtCore.QObject):
 
     def remove_selected_file(self):
         """
-        Supprime le FileObject actuellement sélectionné dans le TreeView.
+        Retire le fichier de l'élément sélectionné dans le TreeView (fichier, voie, filtre...),
+        sans confirmation. Depuis l'interface, voir _delete_selected_item.
         """
+        index = self.view.treefile.currentIndex()
+        if not index.isValid():
+            return
+        obj = index.internalPointer().obj
+        file_obj = obj if isinstance(obj, FileObject) else getattr(obj, "file", None)
+        if file_obj is None:
+            sig = index.internalPointer().signal
+            file_obj = getattr(sig, "file", None)
+        if file_obj in self.workspace.files:
+            self.remove_file(file_obj, confirm=False)
 
+    def _dependent_analyses(self, file_obj) -> list:
+        """Analyses d'AUTRES fichiers dont la référence est une voie de file_obj."""
+        dependents = []
+        for other in self.workspace.files:
+            if other is file_obj:
+                continue
+            for sig in other.signals:
+                for analysis in sig.analyses.values():
+                    # _params : get_params() remplace la référence par son nom
+                    ref = analysis._params.get("reference")
+                    if isinstance(ref, SignalObject) and ref.file is file_obj:
+                        dependents.append((sig, analysis))
+        return dependents
+
+    def remove_file(self, file_obj, confirm: bool = True):
+        """
+        Retire un fichier de l'espace de travail (annulable avec Ctrl+Z). Les données ne
+        sont pas supprimées du disque.
+        """
+        if confirm:
+            text = (f"Retirer le fichier « {file_obj.name} » de l'espace de travail ?\n\n"
+                    "Le fichier n'est pas supprimé du disque, et l'opération est annulable "
+                    "avec Ctrl+Z.")
+            dependents = self._dependent_analyses(file_obj)
+            if dependents:
+                text += (f"\n\n{len(dependents)} analyse(s) d'autres fichiers utilisent une "
+                         "de ses voies comme référence : elles seront signalées ⚠.")
+            answer = QtWidgets.QMessageBox.question(
+                        self.view, "Retirer le fichier", text,
+                        QtWidgets.QMessageBox.StandardButton.Yes |
+                        QtWidgets.QMessageBox.StandardButton.No,
+                        QtWidgets.QMessageBox.StandardButton.No)
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+        self.workspace_ctrl.undo_stack.push(RemoveFileCommand(self, file_obj))
+        self._select_first_available_file()
+
+    def _detach_file(self, file_obj):
+        """
+        Retire un fichier de l'espace de travail, de l'arbre et du graphique
+        (RemoveFileCommand.redo). Le FileObject est conservé pour l'undo.
+
+        Returns:
+            la voie de référence (action « référence ») si elle appartenait au fichier
+        """
+        ref = self.workspace.reference_signal
+        removed_ref = ref if ref is not None and ref.file is file_obj else None
+        if removed_ref is not None:
+            self.workspace.set_reference_signal(None)
+            self.graph_ctrl.set_reference_signal(None)
+            self.tree_ctrl.set_reference_signal(None)
+
+        for sig in file_obj.signals:
+            for derived in sig.derived_signals:
+                self.graph_ctrl.remove_signal_curve(derived)
+            self.graph_ctrl.remove_signal_curve(sig)
+        self.workspace.files.remove(file_obj)
+        file_obj.removed = True
+        self.model.remove_file_subtree(file_obj)
+
+        if getattr(self.cursor_ctrl.signal, "file", None) is file_obj:
+            self.cursor_ctrl.set_signal(None)
+        if self.param_ctrl.shows(file_obj):
+            self.param_ctrl.clear()
+        # analyses d'autres fichiers dont la référence vient d'être retirée
+        self._refresh_derived()
+        self.graph_ctrl.update_vbox()
+        return removed_ref
+
+    def _attach_file(self, file_obj, index: int, reference=None):
+        """Remet un fichier retiré à sa place (RemoveFileCommand.undo)."""
+        file_obj.removed = False
+        self.workspace.files.insert(index, file_obj)
+        self.model.add_file_subtree(file_obj, row=index)
+        self._add_file_curves(file_obj)
+        if reference is not None:
+            self.workspace.set_reference_signal(reference)
+            self.graph_ctrl.set_reference_signal(reference)
+            self.tree_ctrl.set_reference_signal(reference)
+        self._refresh_derived()
+        self.graph_ctrl.update_vbox()
+
+    def _delete_selected_item(self):
+        """
+        « Delete selection » / touche Suppr dans l'arbre : retire le fichier (après
+        confirmation) ou supprime le filtre / l'analyse sélectionné (annulable).
+        """
         index = self.view.treefile.currentIndex()
         if not index.isValid():
             return
         item = index.internalPointer()
         obj = item.obj
-        # Si l'utilisateur a sélectionné un signal ou un filtre,
-        # on remonte au FileObject parent
-        if isinstance(obj, SignalObject):
-            file_obj = obj.file
-        elif isinstance(obj, FileObject):
-            file_obj = obj
-        else:
-            return
-        # Retirer les courbes du graph
-        for sig in file_obj.signals:
-            self.graph_ctrl.remove_signal_curve(sig)
-        # Retirer du workspace
-        self.workspace.files.remove(file_obj)
-        # Retirer du modèle Qt (CRUCIAL)
-        self.model.remove_file_subtree(file_obj)
-        # Nettoyer curseur / sélection si nécessaire
-        if self.cursor_ctrl.signal and self.cursor_ctrl.signal.file is file_obj:
-            self.cursor_ctrl.set_signal(None)
-        # (optionnel) sélectionner un autre item
-        self._select_first_available_file()
+        match item.item_type:
+            case itemType.FILE:
+                self.remove_file(obj)
+            case itemType.FILTER:
+                sig = item.signal
+                self.workspace_ctrl.push(sig, ActionRequest(
+                                    action_modifier = custom_types.ActionModifier.REMOVE_ACTION,
+                                    action_type     = obj.action_type,
+                                    params          = {},
+                                    index           = sig.get_filter_index_by_id(obj.id)))
+            case itemType.ANALYSE:
+                sig = item.signal
+                self.workspace_ctrl.push(sig, ActionRequest(
+                                    action_modifier = custom_types.ActionModifier.REMOVE_ACTION,
+                                    action_type     = obj.action_type,
+                                    params          = {},
+                                    index           = sig.get_analysis_index_by_id(obj.id)))
 
     def _select_first_available_file(self):
         """
@@ -610,6 +706,8 @@ class MainController(QtCore.QObject):
                 #signal est un FileObject, il faut mettre à jour toutes les courbes associées
                 for signal in sig.signals:
                     self.graph_ctrl.update_signal(signal)
+                # libellé de l'arbre (étiquette du fichier)
+                self.model.refresh_object(sig)
                 # décalage / troncature : données d'entrée des analyses modifiées
                 self._refresh_derived()
             return
@@ -734,15 +832,16 @@ class MainController(QtCore.QObject):
         supprimer, appliquer macro, etc.).
         """
 
+        if action_type == custom_types.qSignalType.DEL:
+            # fichier, filtre ou analyse : pas forcément de signal visé
+            self._delete_selected_item()
+            return
         signal = self._current_signal()
         if signal is None:
             return
         match action_type:
             case  custom_types.qSignalType.REF:
                 self._set_selected_signal_as_reference()
-            case custom_types.qSignalType.DEL:
-                pass
-                #self.remove_signal(signal)
             case custom_types.qSignalType.ISOLATE:
                 self._isolate_signal()
             case custom_types.qSignalType.START:
