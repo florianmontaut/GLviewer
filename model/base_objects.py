@@ -379,6 +379,59 @@ class SignalObject:
         """Axe des temps brut du fichier (commun aux voies, en lecture seule)."""
         return self.file.get_raw_x()
 
+    def time_shift(self) -> float:
+        """
+        Décalage entre l'axe des temps affiché (décalage du fichier, filtres « X offset »)
+        et le temps de l'enregistrement (secondes depuis le début du fichier, sans
+        décalage). Une plage exprimée en temps de l'enregistrement reste sur les mêmes
+        échantillons quand le signal est décalé.
+        """
+        x = self.x
+        if len(x) == 0:
+            return 0.0
+        record_time = self.file.get_raw_x()[self.file.window().start] - self.file.offset
+        return float(x[0] - record_time)
+
+    def input_key(self) -> tuple:
+        """
+        État des données du signal : pipeline (filtres, undo/redo) et fenêtre du fichier
+        (décalage, troncatures). Sert à détecter les signaux dérivés périmés.
+        """
+        window = self.file.window()
+        return (self.pipeline_version, self.file.offset, window.start, window.stop)
+
+    def refresh_derived(self) -> tuple[list, list]:
+        """
+        Recalcule les signaux dérivés des analyses dont les données d'entrée ont changé
+        depuis leur calcul (filtre ajouté, décalage du fichier, référence modifiée...).
+        Une analyse dont le recalcul échoue perd son signal dérivé (courbe périmée
+        retirée) et garde la raison dans analysis.error ; elle est retentée quand ses
+        données d'entrée changent à nouveau.
+
+        Returns:
+            (analyses recalculées ou en échec, messages d'échec)
+        """
+        changed, errors = [], []
+        for analysis in self.analyses.values():
+            key = analysis.input_key(self)
+            current = [ds for ds in self.derived_signals
+                       if ds.metadata.get('analysis_id') == analysis.id]
+            if current and all(ds.metadata.get('input_key') == key for ds in current):
+                continue
+            if not current and analysis.error is not None and analysis._error_key == key:
+                continue                        # déjà en échec avec ces données
+            for ds in current:
+                self.derived_signals.remove(ds)
+            try:
+                self.derived_signals.append(analysis.derive(self))
+                analysis.error = None
+            except Exception as e:
+                analysis.error = str(e)
+                analysis._error_key = key
+                errors.append(f"{self.name} / {analysis.display_name} : {e}")
+            changed.append(analysis)
+        return changed, errors
+
     def nearest_value(self, x: float):
         """
         Valeur (après filtres) de l'échantillon le plus proche de l'instant x, ou None.

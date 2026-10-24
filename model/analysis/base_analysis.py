@@ -28,6 +28,9 @@ class AnalysisNode(ABC):
         # Initialisation des paramètres depuis le schéma
         self.is_selected = False
         self.id = uuid.uuid4().hex
+        # échec du dernier recalcul automatique (voir SignalObject.refresh_derived)
+        self.error = None
+        self._error_key = None
         self.opts_dict = generate_opts_dict(self.PARAMETER_SCHEMA)
         self._params = {
                             spec["key"]: spec["default"]
@@ -62,6 +65,30 @@ class AnalysisNode(ABC):
     @abstractmethod
     def compute(self, parent_signal: 'SignalObject') -> 'DerivedSignalObject':
         pass
+
+    def display_param(self, key, parent_signal):
+        """
+        Valeur d'un paramètre telle qu'affichée (ParameterTree). Par défaut, la valeur
+        stockée ; voir ThermalModelAnalysis (plage en temps de l'enregistrement).
+        """
+        return self.get_param(key)
+
+    def input_key(self, parent_signal) -> tuple:
+        """
+        État des données d'entrée de l'analyse : si il change, les signaux dérivés sont
+        périmés (voir SignalObject.refresh_derived).
+        """
+        return parent_signal.input_key()
+
+    def derive(self, parent_signal) -> 'DerivedSignalObject':
+        """
+        Calcule le signal dérivé (compute) et lui associe l'état des données d'entrée
+        ayant servi au calcul (metadata['input_key']).
+        """
+        derived = self.compute(parent_signal)
+        derived.metadata.setdefault('analysis_id', self.id)
+        derived.metadata['input_key'] = self.input_key(parent_signal)
+        return derived
 
     # ---------------- AFFICHAGE ----------------
 

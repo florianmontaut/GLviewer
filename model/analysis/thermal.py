@@ -241,6 +241,15 @@ class ThermalModelAnalysis(AnalysisNode):
     # Export / sérialisation
     # --------------------------------------------------
 
+    def display_param(self, key, parent_signal):
+        """La plage est affichée en temps affiché (décalages compris)."""
+        value = self.get_param(key)
+        if (key == 'model_range' and value is not None
+                and self._params.get('range_origin') == 'record'):
+            shift = parent_signal.time_shift()
+            return [float(v) + shift for v in value]
+        return value
+
     @staticmethod
     def upgrade_params(params: dict) -> dict:
         """
@@ -263,6 +272,10 @@ class ThermalModelAnalysis(AnalysisNode):
         Saisir une durée de projection (différente de la valeur calculée) en mode auto
         repasse le modèle en projection manuelle.
         """
+        if 'model_range' in new_params:
+            # plage saisie en temps affiché (curseurs du ParameterTree) : convertie en
+            # temps de l'enregistrement au prochain calcul
+            new_params['range_origin'] = None
         auto = self.get_param('projection_auto')
         duration = new_params.get('projection_duration', self.get_param('projection_duration'))
         if (auto and new_params.get('projection_auto', auto) == auto
@@ -297,13 +310,21 @@ class ThermalModelAnalysis(AnalysisNode):
         x = parent_signal.x
         y = parent_signal.y
 
-        # plage de fit : model_range bornée aux données, tout l'enregistrement par défaut
+        # plage de fit : model_range bornée aux données, tout l'enregistrement par défaut.
+        # Elle est stockée en temps de l'enregistrement (range_origin = 'record') pour
+        # suivre les données quand le fichier ou le signal est décalé ; une plage fournie
+        # en temps affiché (création, ParameterTree, ancien projet) est convertie ici.
+        shift = parent_signal.time_shift()
         model_range = self.get_param('model_range')
+        if model_range is not None and self._params.get('range_origin') != 'record':
+            model_range = [float(v) - shift for v in model_range]
+            self._params['model_range'] = model_range
+            self._params['range_origin'] = 'record'
         if model_range is None:
             self.set_fit_range(float(x[0]), float(x[-1]))
         else:
-            t_start = max(float(model_range[0]), float(x[0]))
-            t_end   = min(float(model_range[1]), float(x[-1]))
+            t_start = max(float(model_range[0]) + shift, float(x[0]))
+            t_end   = min(float(model_range[1]) + shift, float(x[-1]))
             if t_end <= t_start:
                 raise RuntimeError("Model range does not overlap the signal")
             self.set_fit_range(t_start, t_end)

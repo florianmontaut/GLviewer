@@ -60,6 +60,12 @@ class DiffSignalAnalysis(AnalysisNode):
         #voir méthode ci-dessus, ne pas remplacer par  get_param !!
         return f"Diff ({self.get_params()['reference']})"
 
+    def input_key(self, parent_signal) -> tuple:
+        # la différence est aussi périmée quand le signal de référence change
+        ref = self.get_param("reference")
+        ref_key = ref.input_key() if isinstance(ref, SignalObject) else None
+        return (parent_signal.input_key(), ref_key)
+
     def resolve_reference(self, signal_map: dict):
         if  ( not isinstance(  self.get_param('reference'), SignalObject)
                 and hasattr(self,'_reference_name')):

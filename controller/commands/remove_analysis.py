@@ -30,10 +30,11 @@ class RemoveAnalysisCommand(ReplayableCommand):
 
     def redo(self):
         self.signal.analyses = od_remove(self.signal.analyses, self.removed_analysis.id)
-        # Supprimer les signaux dérivés associés
+        # Supprimer les signaux dérivés associés (relus ici : ils ont pu être recalculés)
+        self.removed_derived = [ds for ds in self.signal.derived_signals
+                                if ds.metadata.get('analysis_id') == self.removed_analysis.id]
         for ds in self.removed_derived:
-            if ds in self.signal.derived_signals:
-                self.signal.derived_signals.remove(ds)
+            self.signal.derived_signals.remove(ds)
 
         self.model.remove_node(self.signal, self.removed_analysis)
 

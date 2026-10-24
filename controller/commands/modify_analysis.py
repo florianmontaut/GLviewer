@@ -34,13 +34,14 @@ class ModifyAnalysisCommand(ReplayableCommand):
 
     def prepare(self):
         """Recalcul de l'analyse AVANT le push (voir AddAnalysisCommand.prepare)."""
-        self.new_derived = [self.new_node.compute(self.signal)]
+        self.new_derived = [self.new_node.derive(self.signal)]
 
     def _swap(self, old, new, old_derived, new_derived):
         self.signal.analyses = od_replace(self.signal.analyses, old.id, new.id, new)
-        for ds in old_derived:
-            if ds in self.signal.derived_signals:
-                self.signal.derived_signals.remove(ds)
+        # par id : les signaux dérivés ont pu être recalculés (SignalObject.refresh_derived)
+        for ds in [ds for ds in self.signal.derived_signals
+                   if ds.metadata.get('analysis_id') == old.id]:
+            self.signal.derived_signals.remove(ds)
         self.signal.derived_signals.extend(new_derived)
         self.model.replace_node(self.signal, old, new)
 

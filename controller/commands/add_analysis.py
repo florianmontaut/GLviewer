@@ -24,7 +24,7 @@ class AddAnalysisCommand(ReplayableCommand):
         redo() est appelé par Qt (QUndoStack.push) et une exception y serait
         perdue. Si le calcul échoue, la commande n'est jamais empilée.
         """
-        self.derived_signal = self.analysis_node.compute(self.signal)
+        self.derived_signal = self.analysis_node.derive(self.signal)
 
     def redo(self):
         if self.derived_signal is None:
@@ -38,7 +38,9 @@ class AddAnalysisCommand(ReplayableCommand):
     def undo(self):
         node = self.analysis_node
         self.signal.analyses = od_remove(self.signal.analyses, node.id)
-        if self.derived_signal in self.signal.derived_signals:
-            self.signal.derived_signals.remove(self.derived_signal)
+        # par id : le signal dérivé a pu être recalculé (SignalObject.refresh_derived)
+        for ds in [ds for ds in self.signal.derived_signals
+                   if ds.metadata.get('analysis_id') == node.id]:
+            self.signal.derived_signals.remove(ds)
         # notifier le modèle (TreeView)
         self.model.remove_node(self.signal, node)

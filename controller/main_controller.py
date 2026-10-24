@@ -211,10 +211,10 @@ class MainController(QtCore.QObject):
         """
         for sig in file_obj.signals:
             self.graph_ctrl.add_signal_curve(sig)
-            #! ordered dict
-            for analysis in sig.analyses.values():
-                derived = analysis.compute(sig)
-                sig.derived_signals.append(derived)
+            # signaux dérivés des analyses (projet rechargé) ; un échec est signalé dans
+            # l'arbre au lieu d'interrompre le chargement
+            sig.refresh_derived()
+            for derived in sig.derived_signals:
                 self.graph_ctrl.add_signal_curve(derived)
 
     # -------------------------------------------------------------------------
@@ -330,7 +330,12 @@ class MainController(QtCore.QObject):
         modification d'une analyse).
         """
         self.graph_ctrl.update_signal(sig)
+        self._sync_derived_curves(sig)
+        # un filtre (ou son annulation) change les données d'entrée des analyses
+        self._refresh_derived()
 
+    def _sync_derived_curves(self, sig):
+        """Courbes du graph = signaux dérivés actuels de sig."""
         for derived in sig.derived_signals:
             self.graph_ctrl.add_signal_curve(derived)
 
@@ -340,6 +345,28 @@ class MainController(QtCore.QObject):
                         and curve_sig not in sig.derived_signals]
         for curve_sig in obsolete:
             self.graph_ctrl.remove_signal_curve(curve_sig)
+
+    def _refresh_derived(self):
+        """
+        Recalcule les analyses dont les données d'entrée ont changé (filtres, undo/redo,
+        décalage ou troncature du fichier, signal de référence...), sur tous les signaux,
+        puis met à jour l'arbre et les courbes. Les échecs sont signalés.
+        """
+        if self.model is None:
+            return
+        errors = []
+        for file_obj in self.workspace.files:
+            for sig in file_obj.signals:
+                changed, failed = sig.refresh_derived()
+                if not changed:
+                    continue
+                for analysis in changed:
+                    self.model.update_derived(sig, analysis)
+                self._sync_derived_curves(sig)
+                errors += failed
+        if errors:
+            self.view.statusBar().showMessage(
+                    "Analyse(s) non recalculée(s) : " + " ; ".join(errors), 15000)
 
 
     def select_from_context(self, ctx: SelectionContext, source: str = "external"):
@@ -583,6 +610,8 @@ class MainController(QtCore.QObject):
                 #signal est un FileObject, il faut mettre à jour toutes les courbes associées
                 for signal in sig.signals:
                     self.graph_ctrl.update_signal(signal)
+                # décalage / troncature : données d'entrée des analyses modifiées
+                self._refresh_derived()
             return
 
         # ActionRequest.index est une POSITION (int) : on la retrouve à partir de l'id

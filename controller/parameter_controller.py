@@ -104,6 +104,8 @@ class ParameterController(QObject):
             available_signals=[]
 
         self._clear_param_tree()
+        # signal du contexte : conversion des valeurs affichées (ex: plage d'un modèle)
+        self._signal = sig
         x = getattr(sig, 'x', None)
         self._data_range = (float(x[0]), float(x[-1])) if x is not None and len(x) else None
 
@@ -225,7 +227,11 @@ class ParameterController(QObject):
                 # plage [début, fin] stockée dans le node, à défaut l'ensemble du signal
                 key = obj.opts_dict[param_name if group_key is None
                                     else group_key + (param_name,)]
-                value = obj.get_param(key) or self._data_range or spec["cursors_setting"]["pos"]
+                if hasattr(obj, 'display_param'):
+                    value = obj.display_param(key, self._signal)
+                else:
+                    value = obj.get_param(key)
+                value = value or self._data_range or spec["cursors_setting"]["pos"]
                 cursors_setting = dict(spec["cursors_setting"], pos=list(value))
                 param = LinkedCursors(  name = param_name,
                                         graphWidget = self.graph,

@@ -200,6 +200,13 @@ class PipelineTreeModel(QAbstractItemModel):
         col = index.column()
 
         # ---------------- colonne 0 : nom ----------------
+        # analyse dont le dernier recalcul a échoué : signalée, raison en infobulle
+        if obj_type == itemType.ANALYSE and getattr(obj, 'error', None):
+            if role == Qt.ItemDataRole.DisplayRole and col == 0:
+                return f"{obj.display_name} ⚠"
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return f"Analyse non recalculée : {obj.error}"
+
         if role == Qt.ItemDataRole.DisplayRole and col == 0:
             if obj_type in (itemType.ANALYSE, itemType.FILTER):
                 return obj.display_name
@@ -380,6 +387,37 @@ class PipelineTreeModel(QAbstractItemModel):
         # le node n'existe plus : le contexte émis est celui du signal parent
         self.emit_node_event(ActionModifier.REMOVE_ACTION, signal_item)
 
+    def _rebuild_derived_items(self, sig: SignalObject, item: TreeItem, analysis):
+        """Enfants d'une ligne d'analyse = ses signaux dérivés actuels."""
+        index = self.index_from_item(item)
+        if item.children:
+            self.beginRemoveRows(index, 0, len(item.children)-1)
+            item.children.clear()
+            self.endRemoveRows()
+        derived = self._derived_of(sig, analysis)
+        if derived:
+            self.beginInsertRows(index, 0, len(derived)-1)
+            for ds in derived:
+                item.add_child(TreeItem(ds, parent = item))
+            self.endInsertRows()
+
+    def update_derived(self, sig: SignalObject, analysis):
+        """
+        Analyse recalculée automatiquement (données d'entrée modifiées) ou en échec :
+        mise à jour de ses signaux dérivés et de son libellé. Pas de node_event : la
+        sélection et le ParameterTree ne changent pas.
+        """
+        signal_item = self.find_signal_item(sig)
+        if signal_item is None:
+            return
+        item = self.find_item_by_object_id(analysis.id, signal_item)
+        if item is None:
+            return
+        self._rebuild_derived_items(sig, item, analysis)
+        index = self.index_from_item(item)
+        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole,
+                                             Qt.ItemDataRole.ToolTipRole])
+
     def replace_node(self, sig: SignalObject, old_node, new_node):
         """
         Remplace un node par sa version modifiée (nodes immutables : modifier un
@@ -397,16 +435,7 @@ class PipelineTreeModel(QAbstractItemModel):
 
         if new_node.item_type == itemType.ANALYSE:
             # les signaux dérivés ont été recalculés : on reconstruit les enfants
-            if item.children:
-                self.beginRemoveRows(index, 0, len(item.children)-1)
-                item.children.clear()
-                self.endRemoveRows()
-            derived = self._derived_of(sig, new_node)
-            if derived:
-                self.beginInsertRows(index, 0, len(derived)-1)
-                for ds in derived:
-                    item.add_child(TreeItem(ds, parent = item))
-                self.endInsertRows()
+            self._rebuild_derived_items(sig, item, new_node)
 
         self.dataChanged.emit(  index,
                                 index,
