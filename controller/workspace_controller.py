@@ -139,9 +139,11 @@ class WorkspaceController(QtCore.QObject):
         return optimized
 
 
-    def push(self,sig,action_request:ActionRequest) -> bool:
+    def push(self,sig,action_request:ActionRequest, errors: list = None) -> bool:
         """
         Crée la commande correspondant à action_request et l'empile dans l'undo_stack.
+            errors : si fourni, un échec y est ajouté, (sig, message), au lieu d'être
+                     signalé par une boîte de dialogue (voir push_group)
 
         Returns:
             bool: True si l'action a été appliquée, False si elle a échoué / été annulée
@@ -171,6 +173,9 @@ class WorkspaceController(QtCore.QObject):
             #! créer une méthode handleError
             # InvalidModelFit, fit scipy non convergent, paramètres invalides,
             # node introuvable...
+            if errors is not None:
+                errors.append((sig, str(e)))
+                return False
             QtWidgets.QMessageBox.warning(
                                             None,
                                             "Action impossible",
@@ -207,6 +212,37 @@ class WorkspaceController(QtCore.QObject):
         print(f'workspace PUSH: {ctx}')
         self.undo_redo_macro_activated.emit(ctx)
         return True
+
+    def push_group(self, signals, build_request, text: str):
+        """
+        Applique une action à plusieurs voies (vue « Par voie » : voie logique, groupe),
+        comme une seule entrée de l'historique : un Ctrl+Z annule tout.
+        Une voie en échec (ex: modèle thermique non convergent) n'empêche pas les autres.
+
+        Args:
+            signals         : voies visées
+            build_request   : callable(sig) -> ActionRequest (None : voie ignorée)
+            text            : libellé de l'entrée de l'historique
+
+        Returns:
+            (nombre de voies traitées, [(sig, message d'erreur), ...])
+        """
+        failures = []
+        applied = 0
+        self.undo_stack.beginMacro(text)
+        try:
+            for sig in signals:
+                request = build_request(sig)
+                if request is not None and self.push(sig, request, errors=failures):
+                    applied += 1
+        finally:
+            self.undo_stack.endMacro()
+        if not applied:
+            # entrée vide : retirée de l'historique (voir apply_macro)
+            self.undo_stack.undo()
+            self.undo_stack.command(self.undo_stack.index()).setObsolete(True)
+            self.undo_stack.redo()
+        return applied, failures
 
     def apply_macro(self, macro: Macro|str, signal) -> bool:
         """

@@ -11,6 +11,7 @@ Les associations faites à la main (Workspace.channel_links) passent avant le mo
 automatique ; elles sont propres à chaque mode.
 """
 import re
+import uuid
 from dataclasses import dataclass, field
 
 from ressources.custom_types import itemType
@@ -73,6 +74,60 @@ class ChannelGroup:
         """True / False si toutes les voies sont affichées / masquées, None sinon."""
         states = {sig.visible for sig in self.signals}
         return states.pop() if len(states) == 1 else None
+
+
+@dataclass(eq=False)
+class UserGroup:
+    """
+    Groupe de voies logiques créé par l'utilisateur (ex: « Bobinages » = BOB PH1, BOB PH2,
+    BOB PH3) : un filtre ou une analyse s'applique d'un coup à toutes ses voies.
+        keys     : clés des voies logiques du groupe (une voie est dans un seul groupe)
+        channels : voies logiques présentes (ChannelGroup), voir build_channel_tree
+    """
+    name:       str
+    keys:       list = field(default_factory=list)
+    id:         str = field(default_factory=lambda: uuid.uuid4().hex)
+    channels:   list = field(default_factory=list, repr=False)
+
+    item_type = itemType.CHANNEL_GROUP
+
+    @property
+    def display_name(self) -> str:
+        return self.name
+
+    @property
+    def signals(self) -> list:
+        return [sig for channel in self.channels for sig in channel.signals]
+
+    @property
+    def visible(self) -> bool | None:
+        states = {sig.visible for sig in self.signals}
+        return states.pop() if len(states) == 1 else None
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "keys": list(self.keys)}
+
+    @staticmethod
+    def from_dict(data: dict) -> "UserGroup":
+        return UserGroup(name=data["name"], keys=list(data.get("keys", [])))
+
+
+def build_channel_tree(workspace) -> list:
+    """
+    Premier niveau de la vue « Par voie » : les groupes de l'utilisateur (avec leurs voies
+    logiques présentes, dans l'ordre du groupe), puis les voies hors groupe.
+    Les clés dépendent du mode d'appariement : un groupe peut être vide dans l'autre mode.
+    """
+    channels = group_channels(workspace)
+    by_key = {channel.key: channel for channel in channels}
+    placed = set()
+    entries = []
+    for group in workspace.channel_groups:
+        group.channels = [by_key[key] for key in group.keys if key in by_key]
+        placed.update(group.keys)
+        entries.append(group)
+    entries.extend(channel for channel in channels if channel.key not in placed)
+    return entries
 
 
 def _group_name(sig, mode) -> str:

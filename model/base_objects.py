@@ -800,6 +800,8 @@ class Workspace:
         # la main, par mode : {mode: {SignalObject: clé de la voie logique}}
         self.channel_matching = None
         self.channel_links = {"name": {}, "channel": {}}
+        # groupes de voies logiques créés par l'utilisateur (model.channels.UserGroup)
+        self.channel_groups = []
         # textes ajoutés sur le graphique : id -> TextAnnotation
         self.annotations = OrderedDict()
 
@@ -829,12 +831,15 @@ class Workspace:
                 if sig.file in self.files:
                     links.append({"mode": mode, "file": self.files.index(sig.file),
                                   "signal": sig.name, "key": key})
-        return {"matching": self.channel_matching, "links": links}
+        return {"matching": self.channel_matching, "links": links,
+                "groups": [group.to_dict() for group in self.channel_groups]}
 
     def channels_from_dict(self, data: dict):
         """Inverse de channels_to_dict (absent des projets plus anciens)."""
+        from model.channels import UserGroup
         data = data or {}
         self.channel_matching = data.get("matching")
+        self.channel_groups = [UserGroup.from_dict(group) for group in data.get("groups", [])]
         for link in data.get("links", []):
             try:
                 file_obj = self.files[link["file"]]

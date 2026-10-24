@@ -3,6 +3,8 @@
 
 from operator import index
 
+import uuid
+
 import pandas as pd
 import pyqtgraph as pg
 from PyQt6 import QtCore,QtGui,QtWidgets
@@ -26,7 +28,8 @@ from controller.channel_tree_controller import ChannelTreeController
 from model.channel_tree_model import ChannelTreeModel
 from model.channels import (MATCHING_ASK, MATCHING_MODES, MATCHING_SETTINGS, group_channels,
                             same_grouping)
-from controller.commands.channel_link import ChannelLinkCommand, ChannelMatchingCommand
+from controller.commands.channel_link import (ChannelLinkCommand, ChannelMatchingCommand,
+                                              ChannelGroupsCommand)
 from ressources.custom_dialogs import ChannelMatchingDialog
 
 from model.tree_item import TreeItem
@@ -54,6 +57,8 @@ class MainController(QtCore.QObject):
         super().__init__()
         self.view = view
         self.settings={} #? basculer settings dans model ? (PipelineTreeModel) 16/03
+        # vue « Par voie » : voies du modèle thermique en attente de la plage (graphique)
+        self._pending_model_signals = None
 
         # Contrôleurs UI
         self.tree_ctrl      = TreeController(view.treefile)
@@ -454,6 +459,14 @@ class MainController(QtCore.QObject):
                                                   QtCore.Qt.ConnectionType.QueuedConnection)
         self.channel_ctrl.link_requested.connect(self.link_channel)
         self.channel_ctrl.matching_requested.connect(self.set_channel_matching)
+        # groupes de voies, actions sur toutes les voies d'une sélection
+        self.channel_ctrl.group_edit_requested.connect(self.edit_channel_groups)
+        self.channel_ctrl.apply_requested.connect(self.apply_to_signals)
+        self.channel_ctrl.has_reference = lambda: self.workspace.reference_signal is not None
+        self.channel_model.group_requested.connect(
+            lambda keys, gid: self.edit_channel_groups("add", (gid, keys)) if gid is not None
+                              else self.edit_channel_groups("remove", keys),
+            QtCore.Qt.ConnectionType.QueuedConnection)
 
     def _choose_channel_matching(self):
         """
@@ -506,6 +519,137 @@ class MainController(QtCore.QObject):
         """Mode d'appariement des voies (par nom / par numéro CH), annulable."""
         if mode != self.workspace.matching_mode or self.workspace.channel_matching is None:
             self.workspace_ctrl.undo_stack.push(ChannelMatchingCommand(self, mode))
+
+    # ---------------- groupes de voies ----------------
+
+    def edit_channel_groups(self, operation: str, arg):
+        """
+        Groupes de voies de la vue « Par voie » (annulable). Une voie logique n'est que
+        dans un seul groupe : l'ajouter à un groupe la retire des autres.
+            "new"    : clés des voies          (nom demandé)
+            "add"    : (id du groupe, clés)
+            "remove" : clés des voies (retirées de leur groupe)
+            "rename" : id du groupe            (nom demandé)
+            "delete" : id du groupe            (ses voies reviennent hors groupe)
+        """
+        state = ChannelGroupsCommand.snapshot(self.workspace)
+        names = {gid: name for gid, name, _ in state}
+
+        def without(keys):
+            return [(gid, name, [k for k in group_keys if k not in keys])
+                    for gid, name, group_keys in state]
+        match operation:
+            case "new":
+                name = self._ask_group_name("Nouveau groupe", f"Groupe {len(state) + 1}")
+                if not name:
+                    return
+                state = without(arg) + [(uuid.uuid4().hex, name, list(arg))]
+                text = f"New channel group {name}"
+            case "add":
+                gid, keys = arg
+                state = [(g, n, k + list(keys) if g == gid else k)
+                         for g, n, k in without(keys)]
+                text = f"Add channels to {names.get(gid)}"
+            case "remove":
+                state = without(arg)
+                text = "Remove channels from group"
+            case "rename":
+                name = self._ask_group_name("Renommer le groupe", names.get(arg, ""))
+                if not name or name == names.get(arg):
+                    return
+                state = [(g, name if g == arg else n, k) for g, n, k in state]
+                text = f"Rename channel group {name}"
+            case "delete":
+                state = [entry for entry in state if entry[0] != arg]
+                text = f"Delete channel group {names.get(arg)}"
+            case _:
+                raise ValueError(operation)
+        if state != ChannelGroupsCommand.snapshot(self.workspace):
+            self.workspace_ctrl.undo_stack.push(ChannelGroupsCommand(self, state, text))
+
+    def _ask_group_name(self, title: str, default: str) -> str | None:
+        name, ok = QtWidgets.QInputDialog.getText(self.view, title, "Nom du groupe :",
+                                                  text=default)
+        return name.strip() if ok and name.strip() else None
+
+    def apply_to_signals(self, signals, action_type):
+        """
+        Vue « Par voie » : filtre ou analyse sur toutes les voies d'une sélection (voie
+        logique, groupe), en une seule entrée de l'historique.
+        """
+        signals = [sig for sig in signals if sig in self.workspace_signals()]
+        if not signals:
+            return
+        T = custom_types.qSignalType
+        if action_type == T.MODEL:
+            # plage choisie une fois sur le graphique (première voie), puis appliquée à
+            # toutes (voir _on_model_range_accepted)
+            self._pending_model_signals = signals
+            self.graph_ctrl.start_range_selection(signals[0])
+            self.view.statusBar().showMessage(self.graph_ctrl.range_picker.HINT)
+            return
+        if action_type in (T.OFFSET, T.OFFSET_X):
+            value = self._ask_group_value(action_type)
+            if value is None:
+                return
+            key = "offset" if action_type == T.OFFSET else "shift_seconds"
+            build = lambda sig: ActionRequest(
+                                    action_modifier = custom_types.ActionModifier.ADD_ACTION,
+                                    action_type     = action_type,
+                                    params          = {key: value},
+                                    index           = None)
+        elif action_type == T.DIFF:
+            build = self._group_diff_request
+        else:
+            build = lambda sig: self._build_action_request(sig, action_type)
+        self._push_group(signals, build, action_type)
+
+    def _push_group(self, signals, build, action_type):
+        applied, failures = self.workspace_ctrl.push_group(
+                                signals, build, f"{action_type.name} on {len(signals)} channels")
+        self.view.statusBar().showMessage(f"Action appliquée à {applied} voie(s)", 5000)
+        if failures:
+            lines = "\n".join(f"• {sig.name} ({sig.file.label or sig.file.name}) : {message}"
+                              for sig, message in failures)
+            QtWidgets.QMessageBox.warning(self.view, "Action impossible sur certaines voies",
+                                          f"{applied} voie(s) traitée(s), "
+                                          f"{len(failures)} en échec :\n{lines}")
+
+    def _ask_group_value(self, action_type) -> float | None:
+        """Décalage commun à toutes les voies (Y, ou X en secondes)."""
+        if action_type == custom_types.qSignalType.OFFSET:
+            title, label = "Add an Y offset", "Décalage en Y de toutes les voies :"
+        else:
+            title, label = "Add an X offset", "Décalage en X de toutes les voies (s) :"
+        value, ok = QtWidgets.QInputDialog.getDouble(self.view, title, label, 0.0,
+                                                     -1e12, 1e12, 3)
+        return value if ok else None
+
+    def _reference_for(self, sig):
+        """
+        Référence de température de sig : la voie de référence du même essai si elle y
+        existe (ex: T AMB de chaque fichier), sinon la référence définie.
+        """
+        ref = self.workspace.reference_signal
+        if ref is None:
+            return None
+        for channel in self.channel_model.groups():
+            if ref in channel.signals:
+                same_file = [s for s in channel.signals if s.file is sig.file]
+                if same_file:
+                    return same_file[0]
+        return ref
+
+    def _group_diff_request(self, sig):
+        ref = self._reference_for(sig)
+        if ref is None or ref is sig:
+            return None
+        action_type = (custom_types.qSignalType.DIFF if ref.file is sig.file
+                       else custom_types.qSignalType.DIFF_EXT)
+        return ActionRequest(action_modifier = custom_types.ActionModifier.ADD_ACTION,
+                             action_type     = action_type,
+                             params          = {'reference': ref},
+                             index           = None)
 
     def workspace_signals(self) -> set:
         return {sig for file_obj in self.workspace.files for sig in file_obj.signals}
@@ -716,8 +860,7 @@ class MainController(QtCore.QObject):
         self.graph_ctrl.snap_toggled.connect(self.on_snap_toggled)
         self.graph_ctrl.menu_actions_triggered.connect(self._action_concentrator)
         self.graph_ctrl.range_picker.accepted.connect(self._on_model_range_accepted)
-        self.graph_ctrl.range_picker.cancelled.connect(
-                                                lambda _: self.view.statusBar().clearMessage())
+        self.graph_ctrl.range_picker.cancelled.connect(self._on_model_range_cancelled)
         # textes du graphique : chaque action de l'utilisateur est une commande undo/redo
         annotations_view = self.graph_ctrl.graph_tree_ctrl
         annotations_view.annotation_created.connect(
@@ -740,6 +883,16 @@ class MainController(QtCore.QObject):
     def _on_model_range_accepted(self, signal, t_start: float, t_end: float):
         """Plage validée sur le graphique : création du modèle thermique."""
         self.view.statusBar().clearMessage()
+        signals, self._pending_model_signals = self._pending_model_signals, None
+        if signals:
+            # vue « Par voie » : même plage pour toutes les voies de la sélection
+            self._push_group(signals, lambda sig: ActionRequest(
+                                action_modifier = custom_types.ActionModifier.ADD_ACTION,
+                                action_type     = custom_types.qSignalType.MODEL,
+                                params          = {'model_range': [t_start, t_end]},
+                                index           = None),
+                             custom_types.qSignalType.MODEL)
+            return
         self.workspace_ctrl.push(
                                 signal,
                                 ActionRequest(
@@ -750,6 +903,10 @@ class MainController(QtCore.QObject):
                                     )
                                 )
 
+
+    def _on_model_range_cancelled(self, *_):
+        self._pending_model_signals = None
+        self.view.statusBar().clearMessage()
 
     def _connect_cursor_signals(self):
 
@@ -960,6 +1117,7 @@ class MainController(QtCore.QObject):
             case custom_types.qSignalType.MACRO:
                 self.workspace_ctrl.apply_macro(macro_name,signal)
             case custom_types.qSignalType.MODEL:
+                self._pending_model_signals = None
                 # la plage des données d'entrée est choisie sur le graphique avant la
                 # création du modèle (voir _on_model_range_accepted)
                 self.graph_ctrl.start_range_selection(signal)

@@ -9,6 +9,7 @@ class itemType(Enum):
     ANALYSE = auto()
     DERIVED = auto()
     CHANNEL = auto()    # voie logique de la vue « Par voie » (model.channels.ChannelGroup)
+    CHANNEL_GROUP = auto()  # groupe de voies logiques créé par l'utilisateur (UserGroup)
 class qSignalType(Enum):
 
     LOAD        = auto()

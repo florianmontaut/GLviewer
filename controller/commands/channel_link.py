@@ -50,3 +50,40 @@ class ChannelMatchingCommand(QUndoCommand):
 
     def undo(self):
         self._apply(self.old_mode)
+
+
+class ChannelGroupsCommand(QUndoCommand):
+    """
+    Groupes de voies de la vue « Par voie » (création, renommage, ajout / retrait de
+    voies, suppression) : l'état complet des groupes avant / après est conservé.
+        groups : nouvel état, liste de (id, nom, clés des voies)
+    """
+
+    def __init__(self, controller, groups: list, text: str):
+        super().__init__(text)
+        self.controller = controller
+        self.new_state = [(gid, name, list(keys)) for gid, name, keys in groups]
+        self.old_state = self.snapshot(controller.workspace)
+
+    @staticmethod
+    def snapshot(workspace) -> list:
+        return [(g.id, g.name, list(g.keys)) for g in workspace.channel_groups]
+
+    def _apply(self, state):
+        from model.channels import UserGroup
+        workspace = self.controller.workspace
+        existing = {g.id: g for g in workspace.channel_groups}
+        groups = []
+        for gid, name, keys in state:
+            # même objet si le groupe existait : son dépliage est conservé
+            group = existing.get(gid) or UserGroup(name=name, id=gid)
+            group.name, group.keys = name, list(keys)
+            groups.append(group)
+        workspace.channel_groups = groups
+        self.controller.channel_model.rebuild()
+
+    def redo(self):
+        self._apply(self.new_state)
+
+    def undo(self):
+        self._apply(self.old_state)
