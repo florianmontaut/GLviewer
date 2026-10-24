@@ -31,6 +31,7 @@ from model.channels import (MATCHING_ASK, MATCHING_MODES, MATCHING_SETTINGS, gro
 from controller.commands.channel_link import (ChannelLinkCommand, ChannelMatchingCommand,
                                               ChannelGroupsCommand)
 from ressources.custom_dialogs import ChannelMatchingDialog
+from controller.benchmark_controller import BenchmarkController
 
 from model.tree_item import TreeItem
 
@@ -59,6 +60,7 @@ class MainController(QtCore.QObject):
         self.settings={} #? basculer settings dans model ? (PipelineTreeModel) 16/03
         # vue « Par voie » : voies du modèle thermique en attente de la plage (graphique)
         self._pending_model_signals = None
+        self.benchmark_ctrl = None
 
         # Contrôleurs UI
         self.tree_ctrl      = TreeController(view.treefile)
@@ -121,6 +123,19 @@ class MainController(QtCore.QObject):
         self.view.actionAuto_Extract.triggered.connect(lambda: self.export_ctrl.save_to_json(
                                                                     self.workspace))
         self.view.actionQuit.triggered.connect(self.quit)
+        self.view.actionBenchmark.triggered.connect(self.show_benchmark)
+
+    def show_benchmark(self):
+        """Fenêtre « Benchmark » (Options > Benchmark window), créée à la 1re ouverture."""
+        if self.benchmark_ctrl is None:
+            self.benchmark_ctrl = BenchmarkController(lambda: self.workspace,
+                                                      self.channel_model, self.view)
+        self.benchmark_ctrl.show()
+
+    def _refresh_benchmark(self, *_):
+        """Résultats des modèles modifiés (historique, paramètres d'un fichier...)."""
+        if self.benchmark_ctrl is not None:
+            self.benchmark_ctrl.refresh()
 
     # -------------------------------------------------------------------------
     # LOADING FILE IN THE WORKSPACE
@@ -249,6 +264,8 @@ class MainController(QtCore.QObject):
         self.workspace_ctrl.undo_redo_macro_activated.connect(self.select_from_context)
         self.workspace_ctrl.macro_created.connect(self._on_macro_created)
         self.workspace_ctrl.recording_changed.connect(self._on_recording_changed)
+        # fenêtre « Benchmark » : modèles ajoutés, modifiés, annulés...
+        self.workspace_ctrl.undo_stack.indexChanged.connect(self._refresh_benchmark)
 
     def _connect_tree_signals(self):
         """
@@ -971,6 +988,7 @@ class MainController(QtCore.QObject):
                 self.channel_model.rebuild()
                 # décalage / troncature : données d'entrée des analyses modifiées
                 self._refresh_derived()
+                self._refresh_benchmark()
             return
 
         # ActionRequest.index est une POSITION (int) : on la retrouve à partir de l'id

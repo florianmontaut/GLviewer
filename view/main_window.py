@@ -20,6 +20,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
         self.treefile : QtWidgets.QTreeView
         self._init_tree_tabs()
+        # comparaison des essais (modèles thermiques) : fenêtre à part
+        self.actionBenchmark = QtGui.QAction("Benchmark window", self)
+        self.menuOptions.addAction(self.actionBenchmark)
         self.default_dir=os.path.dirname(__file__)
         #lastest_dir sera mis à jour 
         self.latest_dir=os.path.dirname(__file__)
