@@ -388,13 +388,21 @@ class MouseCursors(pTypes.GroupParameter):
                                     slot = self.mouseUpdate)
         """
 
-    def setCurve(self,curve):
+    DEFAULT_COLOR = QtGui.QColor(100, 100, 100)
 
-        self.leftLimit = 0
-        self.rightLimit = 1
+    def setCurve(self,curve):
+        """Courbe sélectionnée (PlotDataItem ou None) : couleur du curseur accroché."""
         self.curve = curve
-        self.updateGraph(None,[[self.param('snap to selected signal'),None,
-                                self.param('snap to selected signal').value()]])
+        self._apply_colors()
+
+    def _apply_colors(self):
+        """Couleur de la courbe sélectionnée si le curseur y est accroché, gris sinon."""
+        color = self.DEFAULT_COLOR
+        if self.param('snap to selected signal').value() and self.curve is not None:
+            color = QtGui.QColor(self.curve.opts['pen'].color())
+        for cursor in self.cursors:
+            cursor.setPen(color)
+        self.valtext.setColor(color)
         # plus besoin de la dernière position car le curseur_ctrl renvoi la position
         # dès la sélection d'une courbe
         """
@@ -481,11 +489,6 @@ class MouseCursors(pTypes.GroupParameter):
             if value:
                 if self.textIndex<0:
                     self.graph.addItem(self.valtext)
-                    if self.param('snap to selected signal').value() and \
-                        self.curvePoint is not None:
-                        #setParentItem ne semble fonctionner que si l'objet parent
-                        #est chargé dans le graphe\scene
-                        self.valtext.setParentItem(self.curvePoint)
 
                 self.textIndex+=self.itemDict[key]
             else:
@@ -495,28 +498,6 @@ class MouseCursors(pTypes.GroupParameter):
                     self.graph.removeItem(self.valtext)
 
         elif key=='snap to selected signal':
-            if value and self.curve is not None:
-                if self.curvePoint is not None :
-                    self.valtext.setParentItem(None)
-                    self.graph.removeItem(self.curvePoint)
-
-                self.curvePoint=pg.CurvePoint(self.curve)
-                self.graph.addItem(self.curvePoint)
-                curve_color=self.curve.opts['pen'].color()
-                self.valtext.setColor(curve_color)
-                self.cursors[0].setPen(curve_color)
-                self.cursors[1].setPen(curve_color)
-                self.valtext.setParentItem(self.curvePoint)
-
-                #la position étant du texte étant définie par rapport à son parent
-                #il faut retirer son ancienne position
-                self.valtext.setPos(0,0)
-
-            else:
-                if self.curvePoint is not None:
-                    self.valtext.setParentItem(None)
-                    self.graph.removeItem(self.curvePoint)
-                    default_color=(100,100,100)
-                    self.valtext.setColor(default_color)
-                    self.cursors[0].setPen(default_color)
-                    self.cursors[1].setPen(default_color)
+            # la position accrochée est calculée par le CursorController (valeur de la
+            # courbe à l'abscisse de la souris) : ici seule la couleur change
+            self._apply_colors()

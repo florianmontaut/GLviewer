@@ -29,6 +29,37 @@ class RelativeTimeAxis(pg.DateAxisItem):
         return labels
 
 
+class SignalCurveItem(pg.PlotDataItem):
+    """
+    Courbe d'un signal. Avec clipToView, pyqtgraph ne dessine que la partie visible de
+    la courbe, mais calcule aussi son étendue (mise à l'échelle automatique : chargement,
+    « View all », bouton A) sur cette seule partie : la vue restait zoomée. L'étendue est
+    ici calculée sur le jeu de données complet.
+    """
+
+    def dataBounds(self, ax, frac=1.0, orthoRange=None):
+        if not self.curve.isVisible() or self._dataset is None:
+            return super().dataBounds(ax, frac, orthoRange)
+        if frac >= 1.0 and orthoRange is None:
+            rect = self.dataRect()              # mis en cache par pyqtgraph
+            if rect is None:
+                return [None, None]
+            return ([rect.left(), rect.right()] if ax == 0
+                    else [rect.top(), rect.bottom()])
+
+        x, y = self._dataset.x, self._dataset.y
+        values, other = (x, y) if ax == 0 else (y, x)
+        if orthoRange is not None:
+            values = values[(other >= orthoRange[0]) & (other <= orthoRange[1])]
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            return [None, None]
+        if frac >= 1.0:
+            return [float(values.min()), float(values.max())]
+        low, high = np.percentile(values, [50 * (1 - frac), 50 * (1 + frac)])
+        return [float(low), float(high)]
+
+
 class AdaptiveAxisItem(pg.AxisItem):
     """
     Axe dont l'espacement des graduations choisi par l'utilisateur (setTickSpacing,
@@ -162,6 +193,8 @@ class GraphController(QtCore.QObject):
     curve_selected          = QtCore.pyqtSignal(custom_items.SelectionContext)
     reference_requested     = QtCore.pyqtSignal(SignalObject)
     cursor_moved_X          = QtCore.pyqtSignal(float)
+    # case « snap to selected signal » du curseur souris (outils graphiques)
+    snap_toggled            = QtCore.pyqtSignal(bool)
     menu_actions_triggered  = QtCore.pyqtSignal(    custom_types.ActionModifier,
                                                     custom_types.qSignalType,
                                                     object)
@@ -361,7 +394,7 @@ class GraphController(QtCore.QObject):
     def add_signal_curve(self, sig: SignalObject|DerivedSignalObject):
 
         if sig not in self.curves.keys():
-            curve = pg.PlotDataItem(sig.x, sig.y, pen=sig.pen)
+            curve = SignalCurveItem(sig.x, sig.y, pen=sig.pen)
             # voie décochée (HZ détectée à l'import, choix sauvegardé dans le projet...)
             curve.setVisible(sig.visible)
             curve.setCurveClickable(True)
@@ -445,6 +478,8 @@ class GraphController(QtCore.QObject):
         self.old_highlight = None
 
         if sig not in self.curves:
+            # pas de courbe sélectionnée (ex: fichier) : curseur souris non accroché
+            self._update_cursor_color(None)
             return
         curve = self.curves[sig]
         self._update_cursor_color(curve)
@@ -479,12 +514,13 @@ class GraphController(QtCore.QObject):
         self.graph_tree_ctrl = GraphTreeController(self.plot,self.graph_tree,**self.opts)
         self.proxy = pg.SignalProxy(self.plot.scene().sigMouseMoved,rateLimit = 50,
                                     slot = self._on_mouse_moved)
+        self.graph_tree_ctrl.mouseCursor.param('snap to selected signal').sigValueChanged.connect(
+                                    lambda param, value: self.snap_toggled.emit(bool(value)))
 
 
     def _update_cursor_color(self,curve):
-
-        #self.graph_tree_ctrl.mouseCursor.setCurve(curve)
-        pass
+        """Couleur du curseur souris : celle de la courbe sélectionnée (si accroché)."""
+        self.graph_tree_ctrl.mouseCursor.setCurve(curve)
 
 
     def _setup_mouse_guard(self):
@@ -517,6 +553,8 @@ class GraphController(QtCore.QObject):
         if  self.vb.sceneBoundingRect().contains(pos):
 
             mousePoint = self.vb.mapSceneToView(pos)
+            # Y conservé pour le curseur libre (non accroché à une courbe)
+            self._mouse_pos = mousePoint
             self.cursor_moved_X.emit(float(mousePoint.x()))
 
     #MAJ de la position du curseur grâce à la position de la souris
@@ -524,8 +562,10 @@ class GraphController(QtCore.QObject):
 
         if x is None:
             return
-        else:
-            self.graph_tree_ctrl.mouseCursor.mouseUpdate(x,y,)
+        if y is None:
+            # curseur libre : il suit la souris
+            y = float(self._mouse_pos.y())
+        self.graph_tree_ctrl.mouseCursor.mouseUpdate(x,y)
 
     def _init_graph_menu(self):
         """

@@ -132,6 +132,10 @@ class TreeItem:
         """
         from ressources.custom_items import SelectionContext
 
+        if self.item_type == itemType.FILE:
+            # paramètres du fichier (décalage, troncatures) : le contexte porte le FileObject
+            return SelectionContext(role=itemType.FILE, signal=self.obj, item=self)
+
         signal = self.signal
 
         if signal is None:

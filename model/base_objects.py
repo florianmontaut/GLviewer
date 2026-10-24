@@ -94,6 +94,7 @@ class FileObject:
 
         self.signals = []   # Liste de SignalObject
         self._raw_x = None  # cache de l'axe des temps (voir get_raw_x)
+        self._window = None # cache de la fenêtre de troncature (voir window)
         self.is_selected = False
         self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
         self.colormap = pg.colormap.getFromMatplotlib('tab20')
@@ -113,6 +114,7 @@ class FileObject:
             if  time != self.offset:
                 self.offset = time
                 self._raw_x = None
+                self._window = None
                 if isinstance(self.data.index, pd.MultiIndex):
                     #on retire l'index time existant
                     self.data = self.data.reset_index(level = 1,drop = True)
@@ -149,6 +151,43 @@ class FileObject:
                 self.set_offset(value)
             else:
                 setattr(self, key, value)
+                if key in ("start_x", "stop_x"):
+                    self._window = None
+
+    # ---------------- troncature (calque appliqué en entrée du pipeline) ----------------
+
+    def window(self) -> slice:
+        """
+        Échantillons conservés après troncature : Truncate left (start_x) masque les
+        start_x premières secondes de l'enregistrement, Truncate right (stop_x) les stop_x
+        dernières. Les données brutes ne sont pas modifiées ; au moins 2 échantillons
+        sont conservés.
+        """
+        if self._window is None:
+            x = self.get_raw_x()
+            start = int(np.searchsorted(x, x[0] + max(0.0, self.start_x or 0.0), side="left"))
+            stop = int(np.searchsorted(x, x[-1] - max(0.0, self.stop_x or 0.0), side="right"))
+            if stop - start < 2:
+                # troncatures plus longues que l'enregistrement : rien n'est masqué
+                start, stop = 0, len(x)
+            self._window = slice(start, stop)
+        return self._window
+
+    def get_x(self):
+        """
+        Axe des temps après troncature (vue en lecture seule de l'axe brut). Mis en cache :
+        les signaux comparent l'identité de cet axe pour valider leur cache de pipeline.
+        """
+        raw, win = self.get_raw_x(), self.window()
+        key = (id(raw), win.start, win.stop)
+        if getattr(self, "_x_window_key", None) != key:
+            self._x_window = raw[win]
+            self._x_window_key = key
+        return self._x_window
+
+    def get_y(self, name):
+        """Valeurs brutes d'une voie après troncature (copie)."""
+        return self.get_raw_y(name)[self.window()]
 
     def add_signal(self, name: str):
         """Ajoute un signal brut ou calculé."""
@@ -206,7 +245,8 @@ class FileObject:
     
     def get_file_loader_params(self):
         
-        arg_to_export= ['file_type','import_params','address']
+        # paramètres du fichier (ParameterTree) : décalage temporel et troncatures
+        arg_to_export= ['file_type','import_params','address','offset','start_x','stop_x']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         
         return obj_params
@@ -330,7 +370,7 @@ class SignalObject:
         Sans filtre, c'est l'axe des temps brut du fichier.
         """
         if not self.pipeline:
-            return self.file.get_raw_x()
+            return self.file.get_x()
         self.compute()
         return self._x_cache
 
@@ -379,13 +419,14 @@ class SignalObject:
         """
         # toute modification du pipeline incrémente pipeline_version (voir commandes) ;
         # l'axe brut change avec le décalage temporel du fichier (FileObject.set_offset)
-        raw_x = self.file.get_raw_x()
+        # point de départ : données brutes du fichier, fenêtre de troncature appliquée
+        raw_x = self.file.get_x()
         if (self._cache_valid and self._cache_version == self.pipeline_version
                 and self._cache_raw_x is raw_x):
             return self._cache
 
         x = raw_x
-        y = self.raw_y.copy()
+        y = self.file.get_y(self.name)
         for node in self.pipeline.values(): #! orderedDict
             y = node.apply(x, y)
             x = node.apply_x(x)

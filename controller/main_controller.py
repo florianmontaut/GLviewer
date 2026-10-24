@@ -68,7 +68,9 @@ class MainController(QtCore.QObject):
         self.model = None
         self.workspace = Workspace()
         self.settings = self.menu_ctrl.params
-        self.on_snap_toggled(True)
+        # accroche du curseur à la courbe sélectionnée : case « snap to selected signal »
+        self.on_snap_toggled(self.graph_ctrl.graph_tree_ctrl.mouseCursor.param(
+                                                    'snap to selected signal').value())
 
         # Connexions globales GUI
         self._connect_UI_actions()
@@ -369,6 +371,9 @@ class MainController(QtCore.QObject):
         # --------------------------------------------------
         if source != "graph":
             self.graph_ctrl.select_graph_from_context(ctx)
+        # courbe mise en évidence (None pour un fichier) : le curseur souris s'y accroche
+        self.cursor_ctrl.set_signal(self.graph_ctrl.old_highlight)
+        self._refresh_cursor()
         # --------------------------------------------------
         # 5. Chargement ParameterTree
         # --------------------------------------------------
@@ -483,6 +488,7 @@ class MainController(QtCore.QObject):
                                                 self.select_from_context(ctx, source="graph")
                                                 )
         self.graph_ctrl.cursor_moved_X.connect(self._on_cursor_moved)
+        self.graph_ctrl.snap_toggled.connect(self.on_snap_toggled)
         self.graph_ctrl.menu_actions_triggered.connect(self._action_concentrator)
         self.graph_ctrl.range_picker.accepted.connect(self._on_model_range_accepted)
         self.graph_ctrl.range_picker.cancelled.connect(
@@ -527,6 +533,12 @@ class MainController(QtCore.QObject):
 
     def on_snap_toggled(self, enabled):
         self.cursor_ctrl.set_snap(enabled)
+        self._refresh_cursor()
+
+    def _refresh_cursor(self):
+        """Repositionne le curseur souris (accroche ou courbe sélectionnée modifiée)."""
+        if self.model is not None and self.model.cursor_x is not None:
+            self.cursor_ctrl.update_x(self.model.cursor_x)
 
     def _on_cursor_moved(self,x):
         # x est None tant que la souris n'a pas survolé le graphique
