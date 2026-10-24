@@ -24,6 +24,10 @@ from controller.commands.annotations import (AddAnnotationCommand, RemoveAnnotat
 from controller.commands.remove_file import RemoveFileCommand
 from controller.channel_tree_controller import ChannelTreeController
 from model.channel_tree_model import ChannelTreeModel
+from model.channels import (MATCHING_ASK, MATCHING_MODES, MATCHING_SETTINGS, group_channels,
+                            same_grouping)
+from controller.commands.channel_link import ChannelLinkCommand, ChannelMatchingCommand
+from ressources.custom_dialogs import ChannelMatchingDialog
 
 from model.tree_item import TreeItem
 
@@ -145,6 +149,7 @@ class MainController(QtCore.QObject):
 
         self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
         self.workspace.add_file(file_obj)
+        self._choose_channel_matching()
         self.channel_model.rebuild()
 
         if self.model is None:
@@ -444,6 +449,63 @@ class MainController(QtCore.QObject):
         self.channel_ctrl.item_selected.connect(
                                     lambda ctx: self.select_from_context(ctx, source="channels"))
         self.channel_model.visibility_changed.connect(self._on_channel_visibility)
+        # glisser-déposer : traité après le drop (la vue est reconstruite)
+        self.channel_model.link_requested.connect(self.link_channel,
+                                                  QtCore.Qt.ConnectionType.QueuedConnection)
+        self.channel_ctrl.link_requested.connect(self.link_channel)
+        self.channel_ctrl.matching_requested.connect(self.set_channel_matching)
+
+    def _choose_channel_matching(self):
+        """
+        Mode d'appariement des voies d'un nouveau workspace : celui des options, ou, si
+        l'option est « demander », question posée au chargement du 2e fichier quand les
+        deux modes ne regroupent pas les voies de la même façon.
+        """
+        workspace = self.workspace
+        if workspace.channel_matching is not None:
+            return
+        mode = MATCHING_SETTINGS.get(self.settings.get("channel_matching", MATCHING_ASK))
+        if mode is None:
+            if len(workspace.files) < 2 or same_grouping(workspace):
+                return
+            answer = self._ask_channel_matching()
+            if answer is None:                       # annulé : par nom, sans le retenir
+                mode = MATCHING_MODES[0]
+            else:
+                mode, remember = answer
+                if remember:
+                    self._remember_channel_matching(mode)
+        workspace.channel_matching = mode
+
+    def _ask_channel_matching(self):
+        """(mode, retenir le choix) ou None si annulé."""
+        counts = {mode: sum(len(g.signals) > 1 for g in group_channels(self.workspace, mode))
+                  for mode in MATCHING_MODES}
+        dialog = ChannelMatchingDialog(counts, parent=self.view)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return dialog.mode(), dialog.remember.isChecked()
+
+    def _remember_channel_matching(self, mode):
+        """Option « Channel matching between files » (Options > Import settings)."""
+        label = next(label for label, value in MATCHING_SETTINGS.items() if value == mode)
+        options = dict(self.menu_ctrl.params)
+        options["channel_matching"] = label
+        self.menu_ctrl.get_new_settings(options)
+
+    def link_channel(self, sig, key):
+        """Associe à la main sig à la voie logique key (None : appariement automatique)."""
+        if sig not in self.workspace_signals():
+            return
+        mode = self.workspace.matching_mode
+        if self.workspace.channel_links.get(mode, {}).get(sig) == key:
+            return
+        self.workspace_ctrl.undo_stack.push(ChannelLinkCommand(self, sig, key))
+
+    def set_channel_matching(self, mode):
+        """Mode d'appariement des voies (par nom / par numéro CH), annulable."""
+        if mode != self.workspace.matching_mode or self.workspace.channel_matching is None:
+            self.workspace_ctrl.undo_stack.push(ChannelMatchingCommand(self, mode))
 
     def workspace_signals(self) -> set:
         return {sig for file_obj in self.workspace.files for sig in file_obj.signals}

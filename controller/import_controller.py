@@ -185,6 +185,7 @@ class ImportController(QtCore.QObject):
                             #! l'unité, le min max de l'échelle et le disabled qui pourrait
                             #! remplacer ou s'intégrer dans le valid_table
                             channels.append({
+                                                'channel'   : line[0].strip(),
                                                 'name'      : name,
                                                 'min'       : span_min,
                                                 'max'       : span_max,
@@ -269,7 +270,12 @@ class ImportController(QtCore.QObject):
                                             sampling        = file_caracs['sampling'],
                                             n_samples       = file_caracs['n_samples'],
                                             recordDate      = file_caracs['recordDate'],
-                                            import_params   = {'check_table': check_table},
+                                            import_params   = {
+                                                'check_table': check_table,
+                                                # numéro de voie du GL par nom de voie
+                                                'channel_ids': {setting['name']: setting['channel']
+                                                                for setting in channels},
+                                                },
                                             data            = data
                                             )
             if self._from_project == custom_types.ImportMode.INTERACTIVE:
@@ -621,6 +627,8 @@ class ImportController(QtCore.QObject):
         for annotation_data in data["workspace"].get("annotations", []):
             annotation = TextAnnotation.from_dict(annotation_data)
             ws.annotations[annotation.id] = annotation
+        # appariement des voies de la vue « Par voie »
+        ws.channels_from_dict(data["workspace"].get("channels"))
 
         self._from_project=custom_types.ImportMode.INTERACTIVE
         self.project_signal.emit(ws)

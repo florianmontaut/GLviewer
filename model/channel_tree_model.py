@@ -5,7 +5,7 @@ Arbre de la vue « Par voie » : les voies logiques (même voie dans plusieurs f
 sous chacune, ses instances (une voie par fichier, libellée par l'étiquette du fichier).
 Même Workspace que l'arbre « Par fichier » : seule la présentation change.
 """
-from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel, pyqtSignal
+from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel, QMimeData, pyqtSignal
 from PyQt6.QtGui import QColor, QBrush, QFont
 
 from model.tree_item import TreeItem
@@ -17,6 +17,10 @@ class ChannelTreeModel(QAbstractItemModel):
 
     # cases à cocher : voies dont la visibilité vient de changer
     visibility_changed = pyqtSignal(object)
+    # glisser-déposer d'une voie sur une voie logique : (SignalObject, clé de la voie)
+    link_requested = pyqtSignal(object, object)
+
+    MIME_TYPE = "application/x-glviewer-signal"
 
     def __init__(self, workspace, cursor_value=None, parent=None):
         """
@@ -81,7 +85,54 @@ class ChannelTreeModel(QAbstractItemModel):
         flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
         if index.column() == 0:
             flags |= Qt.ItemFlag.ItemIsUserCheckable
+        # une voie d'un fichier se glisse sur une voie logique (ou l'une de ses voies)
+        flags |= Qt.ItemFlag.ItemIsDropEnabled
+        if index.internalPointer().obj.item_type != itemType.CHANNEL:
+            flags |= Qt.ItemFlag.ItemIsDragEnabled
         return flags
+
+    # ---------------- glisser-déposer ----------------
+
+    def supportedDragActions(self):
+        return Qt.DropAction.LinkAction
+
+    def supportedDropActions(self):
+        return Qt.DropAction.LinkAction
+
+    def mimeTypes(self):
+        return [self.MIME_TYPE]
+
+    def mimeData(self, indexes):
+        ids = {index.internalPointer().obj.id for index in indexes
+               if index.internalPointer().obj.item_type != itemType.CHANNEL}
+        data = QMimeData()
+        data.setData(self.MIME_TYPE, ",".join(sorted(ids)).encode())
+        return data
+
+    def _drop_target(self, parent):
+        """Voie logique visée par un dépôt (sur elle ou sur l'une de ses voies)."""
+        if not parent.isValid():
+            return None
+        item = parent.internalPointer()
+        if item.obj.item_type != itemType.CHANNEL:
+            item = item.parent_item
+        return item.obj
+
+    def canDropMimeData(self, data, action, row, column, parent):
+        return data.hasFormat(self.MIME_TYPE) and self._drop_target(parent) is not None
+
+    def dropMimeData(self, data, action, row, column, parent):
+        group = self._drop_target(parent)
+        if group is None or not data.hasFormat(self.MIME_TYPE):
+            return False
+        ids = bytes(data.data(self.MIME_TYPE)).decode().split(",")
+        for sig in self._signals():
+            if sig.id in ids and sig not in group.signals:
+                self.link_requested.emit(sig, group.key)
+        return True
+
+    def _signals(self):
+        return [item.obj for group_item in self.root.children for item in group_item.children]
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
@@ -109,7 +160,12 @@ class ChannelTreeModel(QAbstractItemModel):
         file_obj = sig.file
         if role == Qt.ItemDataRole.DisplayRole:
             if col == 0:
-                return file_obj.label or file_obj.name
+                text = file_obj.label or file_obj.name
+                group = self._group_of(sig)
+                if group is not None and sig.name != group.name and \
+                   not group.name.endswith(f"· {sig.name}"):
+                    text += f" ({sig.name})"
+                return text
             value = self.cursor_value(sig)
             return f"{value:.2f}{sig.unit}" if value is not None else "-"
         if role == Qt.ItemDataRole.CheckStateRole and col == 0:
@@ -118,12 +174,25 @@ class ChannelTreeModel(QAbstractItemModel):
             color = QColor(sig.pen.color())
             color.setAlpha(150)
             return QBrush(color)
-        if role == Qt.ItemDataRole.FontRole and sig.is_selected:
+        manual = sig in self._group_of(sig).manual
+        if role == Qt.ItemDataRole.FontRole and (sig.is_selected or manual):
             font = QFont()
-            font.setBold(True)
+            font.setBold(sig.is_selected)
+            font.setItalic(manual)       # associée à la main
             return font
         if role == Qt.ItemDataRole.ToolTipRole:
-            return f"{sig.name} — {file_obj.name}\n{file_obj.address}"
+            tip = f"{sig.name} — {file_obj.name}\n{file_obj.address}"
+            if sig.channel_id:
+                tip = f"{sig.channel_id} : {tip}"
+            if manual:
+                tip += "\nAssociée à la main (clic droit : rétablir l'association automatique)"
+            return tip
+        return None
+
+    def _group_of(self, sig):
+        for group_item in self.root.children:
+            if sig in group_item.obj.signals:
+                return group_item.obj
         return None
 
     def setData(self, index, value, role=Qt.ItemDataRole.EditRole):

@@ -284,6 +284,19 @@ class FileObject:
             self.signals.append(sig)
         self.resolve_filter_references()
 
+    def channel_id(self, name) -> str | None:
+        """
+        Numéro de la voie d'acquisition : celui du GL (« CH3 », relevé à l'import ; les
+        numéros ne se suivent pas forcément), sinon la position de la colonne (« CH1 »
+        pour la première voie d'un .csv / .txt).
+        """
+        params = self.import_params if isinstance(self.import_params, dict) else {}
+        ids = params.get('channel_ids') or {}
+        if name in ids:
+            return ids[name]
+        columns = list(self.data.columns)
+        return f"CH{columns.index(name) + 1}" if name in columns else None
+
     def get_raw_y(self,name):
         """Vraies données brutes (copie)."""
         return self.data[name].to_numpy(dtype=float, copy=True)
@@ -373,6 +386,11 @@ class SignalObject:
         self._cache_version = None # pipeline_version ayant servi au calcul du cache
 
     # ---------------- BASIC RAW ACCESS ----------------
+
+    @property
+    def channel_id(self) -> str | None:
+        """Numéro de la voie d'acquisition (ex: « CH3 », voir FileObject.channel_id)."""
+        return self.file.channel_id(self.name)
 
     @property
     def x(self):
@@ -777,6 +795,11 @@ class Workspace:
     def __init__(self):
         self.files = []  # list[FileObject]
         self.reference_signal = None
+        # vue « Par voie » : mode d'appariement des voies entre fichiers ("name" /
+        # "channel", None tant que l'utilisateur n'a pas choisi) et associations faites à
+        # la main, par mode : {mode: {SignalObject: clé de la voie logique}}
+        self.channel_matching = None
+        self.channel_links = {"name": {}, "channel": {}}
         # textes ajoutés sur le graphique : id -> TextAnnotation
         self.annotations = OrderedDict()
 
@@ -793,12 +816,40 @@ class Workspace:
         if signal is not None:
             signal.is_reference = True
 
+    @property
+    def matching_mode(self) -> str:
+        """Mode d'appariement des voies en vigueur (par nom tant qu'aucun n'est choisi)."""
+        return self.channel_matching or "name"
+
+    def channels_to_dict(self) -> dict:
+        """Appariement des voies : un signal est repéré par (rang du fichier, nom)."""
+        links = []
+        for mode, mode_links in self.channel_links.items():
+            for sig, key in mode_links.items():
+                if sig.file in self.files:
+                    links.append({"mode": mode, "file": self.files.index(sig.file),
+                                  "signal": sig.name, "key": key})
+        return {"matching": self.channel_matching, "links": links}
+
+    def channels_from_dict(self, data: dict):
+        """Inverse de channels_to_dict (absent des projets plus anciens)."""
+        data = data or {}
+        self.channel_matching = data.get("matching")
+        for link in data.get("links", []):
+            try:
+                file_obj = self.files[link["file"]]
+                sig = next(s for s in file_obj.signals if s.name == link["signal"])
+            except (IndexError, StopIteration):
+                continue
+            self.channel_links.setdefault(link["mode"], {})[sig] = link["key"]
+
     def to_dict(self):
         return {
                 "version": "1.0",
                 "workspace": {
                             "files": [f.to_dict() for f in self.files],
-                            "annotations": [a.to_dict() for a in self.annotations.values()]
+                            "annotations": [a.to_dict() for a in self.annotations.values()],
+                            "channels": self.channels_to_dict(),
                             }
                 }
 

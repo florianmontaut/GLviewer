@@ -28,6 +28,16 @@ params={
                                                                         "key": "datetime_active",
                                                                     },
 
+                            # vue « Par voie » : voies regroupées par nom ou par numéro CH
+                            "Channel matching between files": {
+                                        "type": "list",
+                                        "default": "Ask when a 2nd file is loaded",
+                                        "limits": ["Ask when a 2nd file is loaded",
+                                                   "By channel name",
+                                                   "By channel number (CH)"],
+                                        "key": "channel_matching",
+                                    },
+
                             "Downsample at import": {
                                         "type": "group",
                                         "children": {

@@ -9,7 +9,8 @@ import numpy as np
 from PyQt6.QtWidgets import (QFontDialog,QDialog,QColorDialog,QTabWidget,QGraphicsLineItem,
                             QGraphicsItem,QWidget,QTableWidget,QLineEdit,QCheckBox,QSpinBox,
                             QDoubleSpinBox,QGridLayout,QDialogButtonBox,QTableWidgetItem,
-                            QGraphicsEllipseItem,QFormLayout,QLabel,QSplitter,QVBoxLayout)
+                            QGraphicsEllipseItem,QFormLayout,QLabel,QSplitter,QVBoxLayout,
+                            QRadioButton)
 from PyQt6.uic import loadUi
 from PyQt6 import QtGui,QtCore
 from ressources import custom_struct_functions
@@ -1108,3 +1109,39 @@ class AnalysisParamsDialog(QDialog):
             else:
                 params[key] = widget.text()
         return params
+
+
+class ChannelMatchingDialog(QDialog):
+    """
+    Vue « Par voie », au chargement d'un 2e fichier : regrouper les voies des fichiers
+    par nom ou par numéro de voie (CH) du GL.
+    """
+
+    def __init__(self, counts: dict, parent=None):
+        """
+        Args:
+            counts : {mode: nombre de voies communes à plusieurs fichiers dans ce mode}
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Appariement des voies")
+        self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Les fichiers chargés ne regroupent pas les mêmes voies selon\n"
+                                "le nom ou le numéro de voie. Comment les associer ?"))
+        self.by_name = QRadioButton(f"Par nom de voie ({counts.get('name', 0)} voie(s) "
+                                    "commune(s))")
+        self.by_channel = QRadioButton(f"Par numéro de voie CH ({counts.get('channel', 0)} "
+                                       "voie(s) commune(s))")
+        self.by_name.setChecked(True)
+        layout.addWidget(self.by_name)
+        layout.addWidget(self.by_channel)
+        self.remember = QCheckBox("Retenir ce choix (modifiable dans Options › Import settings)")
+        layout.addWidget(self.remember)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                   QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def mode(self) -> str:
+        return "channel" if self.by_channel.isChecked() else "name"
