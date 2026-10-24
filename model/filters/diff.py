@@ -1,5 +1,7 @@
 # model/filters/diff.py
 
+import numpy as np
+
 from .base_filter import FilterNode
 from ..base_objects import SignalObject
 from ressources.custom_types import qSignalType
@@ -44,7 +46,12 @@ class DiffFilter(FilterNode):
         if not isinstance(self.get_param('reference'), SignalObject):
             raise RuntimeError("No reference signal defined for DiffFilter")
 
-        return y - ref.y
+        ref_x, ref_y = ref.x, ref.y
+        if len(ref_x) == len(x) and np.array_equal(ref_x, x):
+            return y - ref_y
+        # axes des temps différents (décalage temporel d'une des voies) : la référence est
+        # interpolée aux instants du signal, NaN hors de sa plage
+        return y - np.interp(x, ref_x, ref_y, left=np.nan, right=np.nan)
 
     def resolve_reference(self, signal_map: dict):
         if (    not isinstance(  self.get_param('reference'), SignalObject)

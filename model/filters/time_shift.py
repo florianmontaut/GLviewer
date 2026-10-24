@@ -25,5 +25,8 @@ class TimeShiftFilter(FilterNode):
         return f'Time shift (s)({self.get_param("shift_seconds"):g})'
 
     def apply(self, x, y):
-        shift = self.get_param("shift_seconds")
-        return x + shift, y
+        # les valeurs ne changent pas : seul l'axe des temps est décalé (apply_x)
+        return y
+
+    def apply_x(self, x):
+        return x + self.get_param("shift_seconds")

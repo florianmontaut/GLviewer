@@ -37,8 +37,8 @@ class PipelineTreeModel(QAbstractItemModel):
         #curseur Global
         self.cursor_x = None  # position du curseur (abscisse)
 
-        # ✅ index par fichier
-        self.cursor_Y_values_by_file = {}  # FileObject → list[float]
+        # valeur de chaque signal au curseur (après filtres) : SignalObject -> float
+        self.cursor_values = {}
         # pas de cache des QModelIndex des signaux (cf. signal_index) : Qt recommande
         # de ne pas conserver un QModelIndex, l'arbre est la seule source de vérité
         # build signals
@@ -86,7 +86,7 @@ class PipelineTreeModel(QAbstractItemModel):
         self.endInsertRows()
         #la ligne suivante évite les messages d'erreur après le chargement d'un nouveau
         #fichier alors que les curseurs sont présents. En effet sans ces lignes,
-        #self.cursor_Y_values_by_file n'a pas été mis à jour
+        #self.cursor_values ne contiendrait pas les voies du nouveau fichier
         if self.cursor_x is not None:
             self.updateCursorVal(self.cursor_x)
 
@@ -212,8 +212,7 @@ class PipelineTreeModel(QAbstractItemModel):
                 if self.cursor_x is None:
                     return "-"
 
-                file=obj.file
-                val=self.cursor_Y_values_by_file[file][obj.name]
+                val=self.cursor_values.get(obj)
 
                 if isinstance(val, (float, np.floating)):
                     return f"{val:.2f}{obj.unit}"
@@ -275,10 +274,12 @@ class PipelineTreeModel(QAbstractItemModel):
         #MAJ de la colonne value / on peut envisager une version où la colonne serait  déplaçable
         self.cursor_x=x
 
-        for file in self.workspace.files:
-            xs = file.signals[0].x
-            idx = np.argmin(np.abs(xs - np.ones(len(xs))*x))
-            self.cursor_Y_values_by_file[file]=file.get_Y_from_X_index(idx)
+        # valeur de chaque voie APRÈS filtres, à l'instant x de SON axe des temps (une voie
+        # peut être décalée dans le temps) ; recherche dichotomique, à chaque mouvement de
+        # la souris
+        self.cursor_values = {  sig: sig.nearest_value(x)
+                                for file in self.workspace.files
+                                for sig in file.signals}
 
         tl = self.index(0, 1, QModelIndex())
         br = self.index(self.rowCount(QModelIndex()) - 1, 1, QModelIndex())

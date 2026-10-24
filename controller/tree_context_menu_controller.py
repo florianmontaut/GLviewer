@@ -22,6 +22,7 @@ class TreeContextMenu(BaseContextMenu):
         filter_  = self._add_action(qSignalType.FILTER)
         delta_   = self._add_action(qSignalType.DIFF)
         y_offset = self._add_action(qSignalType.OFFSET)
+        x_offset = self._add_action(qSignalType.OFFSET_X)
         model_   = self._add_action(qSignalType.MODEL)
         delete_  = self._add_action(qSignalType.DEL)
         start_rec = self._add_action(qSignalType.START)
@@ -33,6 +34,7 @@ class TreeContextMenu(BaseContextMenu):
                                 filter_,
                                 delta_,
                                 y_offset,
+                                x_offset,
                                 model_,
                                 delete_
                             ])

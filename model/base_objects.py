@@ -314,8 +314,10 @@ class SignalObject:
         # liste des modèles/signaux dérivés
         self.derived_signals = []
 
-        # cache interne
+        # cache interne : y et x calculés par le pipeline
         self._cache = None
+        self._x_cache = None
+        self._cache_raw_x = None   # axe brut ayant servi au calcul du cache
         self._cache_valid = False
         self._cache_version = None # pipeline_version ayant servi au calcul du cache
 
@@ -323,8 +325,35 @@ class SignalObject:
 
     @property
     def x(self):
-        """Axe des abscisses (colonne 0 du DataFrame)."""
+        """
+        Axe des temps calculé par le pipeline (ex: décalage temporel), en lecture seule.
+        Sans filtre, c'est l'axe des temps brut du fichier.
+        """
+        if not self.pipeline:
+            return self.file.get_raw_x()
+        self.compute()
+        return self._x_cache
+
+    @property
+    def raw_x(self):
+        """Axe des temps brut du fichier (commun aux voies, en lecture seule)."""
         return self.file.get_raw_x()
+
+    def nearest_value(self, x: float):
+        """
+        Valeur (après filtres) de l'échantillon le plus proche de l'instant x, ou None.
+        Recherche dichotomique : l'axe des temps est croissant.
+        """
+        xs = self.x
+        if len(xs) == 0:
+            return None
+        ys = self.compute()
+        i = int(np.searchsorted(xs, x))
+        if i >= len(xs):
+            i = len(xs) - 1
+        elif i > 0 and abs(xs[i-1] - x) <= abs(xs[i] - x):
+            i -= 1
+        return float(ys[i])
 
     @property
     def is_modified(self):
@@ -343,17 +372,29 @@ class SignalObject:
 
     # ---------------- PIPELINE COMPUTATION ----------------
     def compute(self):
-        """Calcule y en appliquant chaque filtre dans l’ordre."""
-        # toute modification du pipeline incrémente pipeline_version (voir commandes)
-        if self._cache_valid and self._cache_version == self.pipeline_version:
+        """
+        Calcule y (et l'axe des temps) en appliquant chaque filtre dans l'ordre, comme des
+        calques : chaque filtre reçoit le x et le y produits par les filtres précédents et
+        retourne de nouveaux tableaux. Les données brutes du fichier ne sont jamais modifiées.
+        """
+        # toute modification du pipeline incrémente pipeline_version (voir commandes) ;
+        # l'axe brut change avec le décalage temporel du fichier (FileObject.set_offset)
+        raw_x = self.file.get_raw_x()
+        if (self._cache_valid and self._cache_version == self.pipeline_version
+                and self._cache_raw_x is raw_x):
             return self._cache
 
+        x = raw_x
         y = self.raw_y.copy()
-        if self.pipeline:
-            for node in self.pipeline.values(): #! orderedDict
-                y = node.apply(self.x, y)
+        for node in self.pipeline.values(): #! orderedDict
+            y = node.apply(x, y)
+            x = node.apply_x(x)
+        if x.flags.writeable:
+            x.setflags(write=False)
 
         self._cache = y
+        self._x_cache = x
+        self._cache_raw_x = raw_x
         self._cache_valid = True
         self._cache_version = self.pipeline_version
         return y

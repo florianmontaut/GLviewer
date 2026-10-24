@@ -66,8 +66,16 @@ class  FilterNode(ABC):
     # -------------------------------------------------
     @abstractmethod
     def apply(self, x, y):
-        """Applique le filtre sur y."""
+        """Applique le filtre sur y (retourne un NOUVEAU tableau, y n'est pas modifié)."""
         pass
+
+    def apply_x(self, x):
+        """
+        Transformation de l'axe des temps (ex: décalage temporel). Par défaut x est
+        inchangé. Comme apply, doit retourner un NOUVEAU tableau : l'axe des temps brut du
+        fichier est partagé par toutes les voies et en lecture seule.
+        """
+        return x
 
     # -------------------------------------------------
     # AFFICHAGE

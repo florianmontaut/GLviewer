@@ -34,20 +34,10 @@ class CursorController(QObject):
             self.cursor_moved.emit(x)
             return
 
-        xs = self.signal.x
-        ys = self.signal.y
-        
-        if len(xs) == 0:
+        # valeur après filtres de l'échantillon le plus proche (recherche dichotomique)
+        y = self.signal.nearest_value(x)
+        if y is None:
             self.cursor_moved.emit(x)
             return
 
-        #idx = np.searchsorted(xs, x)
-        idx = np.argmin(np.abs(xs - np.ones(len(xs))*x))
-        if idx <= 0:
-            y = ys[0]
-        elif idx >= len(ys):
-            y = ys[-1]
-        else:
-            y = ys[idx]
-
-        self.cursor_moved.emit([x,  float(y)])
+        self.cursor_moved.emit([x,  y])
