@@ -118,12 +118,16 @@ class MainController(QtCore.QObject):
                                                                     load_file_dialog(
                                                                     custom_types.fileType.CSV))
         self.view.actionParameters.triggered.connect( self.menu_ctrl.open_options_window)
-        self.view.actionSave_to.triggered.connect(lambda: self.export_ctrl.save_workspace(
-                                                                    self.workspace))
+        self.view.actionSave_to.triggered.connect(self.save_project)
         self.view.actionAuto_Extract.triggered.connect(lambda: self.export_ctrl.save_to_json(
                                                                     self.workspace))
         self.view.actionQuit.triggered.connect(self.quit)
         self.view.actionBenchmark.triggered.connect(self.show_benchmark)
+
+    def save_project(self):
+        """Files > Save to : projet .json, ajouté aux fichiers récents."""
+        if self.export_ctrl.save_workspace(self.workspace):
+            self.menu_ctrl.save_recent_file_address(self.workspace.recent_file_params())
 
     def show_benchmark(self):
         """Fenêtre « Benchmark » (Options > Benchmark window), créée à la 1re ouverture."""
@@ -208,8 +212,10 @@ class MainController(QtCore.QObject):
                         analysis.resolve_reference({s.name: s for s in ref_file.signals})
         # les signaux dérivés sont calculés avant la construction de l'arbre
         # afin qu'ils y apparaissent sous leur analyse
+        # fichiers récents : le projet plutôt que chacun de ses fichiers
+        if self.workspace.path:
+            self.menu_ctrl.save_recent_file_address(self.workspace.recent_file_params())
         for file_obj in self.workspace.files:
-            self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
             self._add_file_curves(file_obj)
 
         self._init_workspace_model()
@@ -1246,7 +1252,7 @@ class MainController(QtCore.QObject):
             self.view.close()
         else:
             if self.workspace_ctrl.undo_stack.count() >=1:
-                self.export_ctrl.save_workspace(self.workspace)
+                self.save_project()
                 self.view.close()
             else:
                 self.view.close()

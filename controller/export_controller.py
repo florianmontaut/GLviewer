@@ -52,3 +52,4 @@ class ExportController(QtCore.QObject):
                                             )
         if path:
             self.workspace.save(path)
+        return path or None

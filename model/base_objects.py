@@ -802,6 +802,8 @@ class Workspace:
         self.channel_links = {"name": {}, "channel": {}}
         # groupes de voies logiques créés par l'utilisateur (model.channels.UserGroup)
         self.channel_groups = []
+        # fichier projet .json (ouvert ou enregistré), None si jamais enregistré
+        self.path = None
         # textes ajoutés sur le graphique : id -> TextAnnotation
         self.annotations = OrderedDict()
 
@@ -859,7 +861,12 @@ class Workspace:
                 }
 
 
+    def recent_file_params(self) -> dict:
+        """Entrée du menu « Recent files » pour le projet (voir FileObject.get_file_loader_params)."""
+        return {"file_type": "JSON", "address": self.path, "import_params": {}}
+
     def save(self, path):
+        self.path = path
         with open(path, "w", encoding="utf-8") as f:
             export=self.to_dict()
             json.dump(export, f, indent=2)

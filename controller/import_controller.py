@@ -629,6 +629,7 @@ class ImportController(QtCore.QObject):
             ws.annotations[annotation.id] = annotation
         # appariement des voies de la vue « Par voie »
         ws.channels_from_dict(data["workspace"].get("channels"))
+        ws.path = fname
 
         self._from_project=custom_types.ImportMode.INTERACTIVE
         self.project_signal.emit(ws)
