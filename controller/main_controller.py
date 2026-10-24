@@ -22,6 +22,8 @@ from controller.cursor_controller import CursorController
 from controller.commands.annotations import (AddAnnotationCommand, RemoveAnnotationCommand,
                                              ModifyAnnotationCommand)
 from controller.commands.remove_file import RemoveFileCommand
+from controller.channel_tree_controller import ChannelTreeController
+from model.channel_tree_model import ChannelTreeModel
 
 from model.tree_item import TreeItem
 
@@ -59,6 +61,8 @@ class MainController(QtCore.QObject):
         self.param_ctrl     = ParameterController(view.selectiontree,plotItem)
 
         self.cursor_ctrl    = CursorController()
+        # vue « Par voie » : même workspace, une voie regroupée sur tous les fichiers
+        self.channel_ctrl   = ChannelTreeController(view.treechannels)
 
         # Contrôleurs fonctionnels
         self.import_ctrl = ImportController(view)
@@ -68,6 +72,8 @@ class MainController(QtCore.QObject):
         self.workspace_ctrl = None
         self.model = None
         self.workspace = Workspace()
+        self.channel_model = ChannelTreeModel(self.workspace, cursor_value=self._cursor_value)
+        self.channel_ctrl.set_model(self.channel_model)
         self.settings = self.menu_ctrl.params
         # accroche du curseur à la courbe sélectionnée : case « snap to selected signal »
         self.on_snap_toggled(self.graph_ctrl.graph_tree_ctrl.mouseCursor.param(
@@ -81,6 +87,7 @@ class MainController(QtCore.QObject):
         self._connect_import_signals()
         self._connect_menu_signals()
         self._connect_cursor_signals()
+        self._connect_channel_signals()
 
     # -------------------------------------------------------------------------
     # MENU FILE
@@ -138,6 +145,7 @@ class MainController(QtCore.QObject):
 
         self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
         self.workspace.add_file(file_obj)
+        self.channel_model.rebuild()
 
         if self.model is None:
             # premier fichier : le modèle est construit à partir du workspace
@@ -160,6 +168,8 @@ class MainController(QtCore.QObject):
             self.graph_ctrl.remove_signal_curve(sig)
 
         self.workspace=workspace
+        self.channel_model.workspace = workspace
+        self.channel_model.rebuild()
 
         for file_obj in self.workspace.files:
             for sig in file_obj.signals:
@@ -402,6 +412,11 @@ class MainController(QtCore.QObject):
         # courbe mise en évidence (None pour un fichier) : le curseur souris s'y accroche
         self.cursor_ctrl.set_signal(self.graph_ctrl.old_highlight)
         self._refresh_cursor()
+        # vue « Par voie » : instance de la voie sélectionnée (rien pour un fichier)
+        if source != "channels":
+            target = ctx.signal if ctx.signal in self.workspace_signals() else None
+            self.channel_ctrl.select_signal(target)
+        self.channel_model.refresh()
         # --------------------------------------------------
         # 5. Chargement ParameterTree
         # --------------------------------------------------
@@ -422,6 +437,28 @@ class MainController(QtCore.QObject):
             case _:
                 self.param_ctrl.load_params(ctx)
 
+    # -------------------------------------------------------------------------
+    # VUE « PAR VOIE »
+    # -------------------------------------------------------------------------
+    def _connect_channel_signals(self):
+        self.channel_ctrl.item_selected.connect(
+                                    lambda ctx: self.select_from_context(ctx, source="channels"))
+        self.channel_model.visibility_changed.connect(self._on_channel_visibility)
+
+    def workspace_signals(self) -> set:
+        return {sig for file_obj in self.workspace.files for sig in file_obj.signals}
+
+    def _cursor_value(self, sig):
+        """Valeur au curseur d'une voie (calculée par l'arbre « Par fichier »)."""
+        return self.model.cursor_values.get(sig) if self.model is not None else None
+
+    def _on_channel_visibility(self, signals):
+        """Cases à cocher de la vue « Par voie » : graphique et arbre « Par fichier »."""
+        for sig in signals:
+            self.graph_ctrl.update_signal(sig)
+            if self.model is not None:
+                self.model.refresh_object(sig)
+
     def _on_visibility_changed(self, item, index=None):
         """
         Un filtre ou une analyse a été ajouté(e) ou modifié(e), il faut mettre à jour la
@@ -432,6 +469,7 @@ class MainController(QtCore.QObject):
         else:
             sig=item
         self.graph_ctrl.update_signal(sig)
+        self.channel_model.refresh()
         self._on_cursor_moved(self.model.cursor_x)
 
     def remove_selected_file(self):
@@ -509,6 +547,7 @@ class MainController(QtCore.QObject):
         self.workspace.files.remove(file_obj)
         file_obj.removed = True
         self.model.remove_file_subtree(file_obj)
+        self.channel_model.rebuild()
 
         if getattr(self.cursor_ctrl.signal, "file", None) is file_obj:
             self.cursor_ctrl.set_signal(None)
@@ -524,6 +563,7 @@ class MainController(QtCore.QObject):
         file_obj.removed = False
         self.workspace.files.insert(index, file_obj)
         self.model.add_file_subtree(file_obj, row=index)
+        self.channel_model.rebuild()
         self._add_file_curves(file_obj)
         if reference is not None:
             self.workspace.set_reference_signal(reference)
@@ -673,6 +713,7 @@ class MainController(QtCore.QObject):
             # notifie toute la colonne 1 en transmettant la nouvelle valeur de X(valeur)
             self.model.updateCursorVal(x)
             self.view.treefile.viewport().update()
+            self.channel_model.refresh()
 
     def _on_cursor_computed(self, coord):
         # Vue
@@ -708,6 +749,7 @@ class MainController(QtCore.QObject):
                     self.graph_ctrl.update_signal(signal)
                 # libellé de l'arbre (étiquette du fichier)
                 self.model.refresh_object(sig)
+                self.channel_model.rebuild()
                 # décalage / troncature : données d'entrée des analyses modifiées
                 self._refresh_derived()
             return

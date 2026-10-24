@@ -416,8 +416,8 @@ class PipelineTreeModel(QAbstractItemModel):
         if item is None:
             return
         index = self.index_from_item(item)
-        self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole,
-                                             Qt.ItemDataRole.ToolTipRole])
+        # tous les rôles : libellé, case à cocher (visibilité changée ailleurs)...
+        self.dataChanged.emit(index, index.siblingAtColumn(self.columnCount(index) - 1))
 
     def update_derived(self, sig: SignalObject, analysis):
         """

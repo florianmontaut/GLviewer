@@ -8,6 +8,7 @@ class itemType(Enum):
     FILTER  = auto()
     ANALYSE = auto()
     DERIVED = auto()
+    CHANNEL = auto()    # voie logique de la vue « Par voie » (model.channels.ChannelGroup)
 class qSignalType(Enum):
 
     LOAD        = auto()
