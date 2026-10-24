@@ -129,7 +129,8 @@ class ImportController(QtCore.QObject):
                 if index >=100 :
                     break
                 try:
-                    if element[0] == attribut:
+                    # les lignes vides de l'en-tête sont ignorées
+                    if element and element[0] == attribut:
                         key=[key for key,val in file_caracs.items() if val == attribut][0]
                         id_caracs[key] = index
                         attribut = next(key_gen)#on charge la nouvelle phrase recherchée
@@ -173,10 +174,11 @@ class ImportController(QtCore.QObject):
                         if "CH" in line[0]:
                             name=line[name_position]
                             #print ("import l 120",rawtxt[n][5])
-                            span_max=float(re.sub(r'[^0-9.]', '', line[span_position[0]]).
-                                            replace(',','.'))
-                            span_min=float(re.sub(r'[^0-9.]', '', line[span_position[1]]).
-                                            replace(',','.'))
+                            # le signe est conservé (span négatif : ex. -50 °C)
+                            span_max=float(re.sub(r'[^0-9.\-]', '',
+                                            line[span_position[0]].replace(',','.')))
+                            span_min=float(re.sub(r'[^0-9.\-]', '',
+                                            line[span_position[1]].replace(',','.')))
                             unit=line[span_position[2]]
                             #! il faudrait remonter l'ensemble de ces données au workspace !
                             #! l'unité, le min max de l'échelle et le disabled qui pourrait
@@ -198,7 +200,8 @@ class ImportController(QtCore.QObject):
                         #différencier.
                         if name in filtre:
                             channels[num]['name']=f'CH{num} {name}'
-                        channels_names.append(name)
+                        # nom éventuellement rendu unique (sinon colonnes en double)
+                        channels_names.append(channels[num]['name'])
 
                     #pour éviter la pluspart des problématiques du à l'introduction d'espaces
                     #retour à la ligne on cherche chacun des éléments et leur index plutôt
@@ -485,15 +488,48 @@ class ImportController(QtCore.QObject):
         # Ajouter chaque colonne comme signal brut
         for col in file_obj.data.columns[:]:
             file_obj.add_signal(col)
+        hidden = self.hide_invalid_channels(file_obj)
+        if hidden:
+            self.view.statusbar.showMessage(
+                            f"{len(hidden)} voie(s) non exploitable(s) (HZ) masquée(s) : "
+                            + ", ".join(hidden), 10000)
         self.file_signal.emit(file_obj)
+
+    @staticmethod
+    def hide_invalid_channels(file_obj:FileObject)->list[str]:
+        """
+        Décoche (comme le ferait l'utilisateur dans l'arborescence) les voies déclarées non
+        exploitables à l'import (import_params['check_table'], voir isChannelValid).
+        Uniquement au premier chargement d'un fichier : à la réouverture d'un projet, la
+        visibilité sauvegardée (choix de l'utilisateur) est conservée.
+
+        Returns:
+            list[str]: noms des voies masquées
+        """
+        check_table=(file_obj.import_params or {}).get('check_table', [])
+        if len(check_table) != len(file_obj.signals):
+            return []
+        hidden=[]
+        for sig, valid in zip(file_obj.signals, check_table):
+            if not valid:
+                sig.visible=False
+                hidden.append(sig.name)
+        return hidden
 
 
     @staticmethod
-    def isChannelValid(data,threshold,active,ratio=0.9)->bool:
+    def isChannelValid(data,threshold,active,ratio=0.9,jump_ratio=0.1,max_jumps=0.05)->bool:
         """
-        Méthode permettant de vérifier si les données du channel sont valides
-        ex: un thermocouple mal connecté). Si 90% des données sont les bornes définis
-        du channel, on considère que les données sont valides.
+        Méthode permettant de vérifier si les données du channel sont exploitables.
+        Une voie est déclarée non exploitable (HZ : thermocouple sectionné, entrée du
+        datalogger restée en l'air...) si :
+            - moins de `ratio` (90 %) de ses points sont numériques et dans la plage
+              [min, max] de la voie (ex: span du GL). Une entrée en l'air sature
+              typiquement aux limites du capteur (-270 °C / +900 °C pour un TC K) ;
+            - OU si elle est erratique : plus de `max_jumps` (5 %) des variations d'un
+              point au suivant dépassent `jump_ratio` (10 %) de la largeur de la plage.
+              Une température réelle varie lentement d'un échantillon au suivant, une
+              entrée en l'air saute en permanence, même quand elle reste dans la plage.
         Arguments:
                 data        {pandas.series} signal
                 threshold   {tuple(float,float)|float} seuils à partir des quels les données
@@ -501,25 +537,36 @@ class ImportController(QtCore.QObject):
                                                 n'importe quel ordre. Une valeur seule
                                                 donne la plage symétrique [-val, val]
                 active       {bool}         l'option de filtrage des signaux est elle active
-                ratio       {float}         ratio des données erronnées sur la totalité des
-                                            points à depassser pour déclarer le signal comme
-                                            non valide
+                ratio       {float}         part minimale des points devant être dans la plage
+                jump_ratio  {float}         saut (en part de la largeur de la plage) à partir
+                                            duquel une variation est jugée anormale
+                max_jumps   {float}         part maximale de variations anormales
         Returns:
                 {bool}                      resultat du channel est-il valide ?
         """
         if not active:
             return True
-        else:
-            if ratio<0 or ratio>1 :
-                raise ValueError
-            data_len=data.size
-            if np.isscalar(threshold):
-                threshold=(-abs(threshold),abs(threshold))
-            #les loaders GL/TXT passent (max,min) : between() exige (min,max)
-            low,high=min(threshold),max(threshold)
-            validation_list=data.between(low,high)
-            #retourne l'état de cette comparaison : somme(validation) > seuil = signal OK
-            return sum(validation_list)>ratio*data_len
+        if ratio<0 or ratio>1 :
+            raise ValueError
+        if np.isscalar(threshold):
+            threshold=(-abs(threshold),abs(threshold))
+        #les loaders GL/TXT passent (max,min)
+        low,high=min(threshold),max(threshold)
+
+        values=pd.to_numeric(pd.Series(data),errors='coerce').to_numpy(dtype=float)
+        if values.size == 0:
+            return False
+        # NaN (BURNOUT, texte...) : hors plage
+        in_span=(values>=low) & (values<=high)
+        if in_span.mean() < ratio:
+            return False
+
+        jumps=np.abs(np.diff(values))
+        jumps=jumps[np.isfinite(jumps)]
+        if jumps.size and high > low:
+            if np.mean(jumps > jump_ratio*(high-low)) > max_jumps:
+                return False
+        return True
 
     @staticmethod
     def convertDate(date):

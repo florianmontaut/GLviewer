@@ -275,6 +275,8 @@ class GraphController(QtCore.QObject):
 
         if sig not in self.curves.keys():
             curve = pg.PlotDataItem(sig.x, sig.y, pen=sig.pen)
+            # voie décochée (HZ détectée à l'import, choix sauvegardé dans le projet...)
+            curve.setVisible(sig.visible)
             curve.setCurveClickable(True)
             curve.sigClicked.connect(self._on_curve_clicked)
             self.plot.addItem(curve)
