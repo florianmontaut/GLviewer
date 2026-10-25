@@ -1,15 +1,13 @@
 from model.analysis.thermal import ThermalModelAnalysis
 from model.analysis.fft import FFTAnalysis
 from model.analysis.diff_external import DiffSignalAnalysis
-from model.analysis.formula import FormulaAnalysis
 from ressources.custom_types import qSignalType
 
 class AnalysisFactory:
     REGISTRY = {
                 qSignalType.MODEL       : ThermalModelAnalysis,
                 qSignalType.FFT         : FFTAnalysis,
-                qSignalType.DIFF_EXT    : DiffSignalAnalysis,
-                qSignalType.FORMULA     : FormulaAnalysis,
+                qSignalType.DIFF_EXT    : DiffSignalAnalysis
                 }
 
     def create(self, data):

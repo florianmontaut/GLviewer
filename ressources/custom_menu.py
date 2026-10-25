@@ -10,6 +10,8 @@ class SelectionState:
     is_recording: bool
     # élément supprimable sélectionné dans l'arbre : fichier, filtre ou analyse
     can_delete: bool = False
+    # fichier visé (fichier ou voie sélectionné) : voie calculée
+    has_file: bool = False
 
 
 @dataclass(frozen=True)
@@ -43,8 +45,8 @@ class BaseContextMenu(QtCore.QObject):
                                         enabled_if= lambda s: s.has_selection
                                         ),
                     qSignalType.FORMULA : ActionSpec(
-                                        label="Add a formula",
-                                        enabled_if= lambda s: s.has_selection
+                                        label="Add a computed channel",
+                                        enabled_if= lambda s: s.has_selection or s.has_file
                                         ),
                     qSignalType.MODEL : ActionSpec(
                                         label="Get thermal model",

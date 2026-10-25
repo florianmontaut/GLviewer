@@ -78,7 +78,8 @@ class TreeController(QtCore.QObject):
         if item is None:
             return
         # actions du menu disponibles selon le signal visé (parent d'un filtre...)
-        self.checkStates(item.action_signal, self._is_deletable(item))
+        self.checkStates(item.action_signal, self._is_deletable(item),
+                         item.item_type == itemType.FILE)
         ctx = item.to_selection_context()
         if ctx is None:
             return
@@ -210,15 +211,18 @@ class TreeController(QtCore.QObject):
         sel_model.blockSignals(False)
         # sélection faite sans signal Qt : mise à jour des actions du menu
         item = index.internalPointer()
-        self.checkStates(item.action_signal, self._is_deletable(item))
+        self.checkStates(item.action_signal, self._is_deletable(item),
+                         item.item_type == itemType.FILE)
 
     @staticmethod
     def _is_deletable(item) -> bool:
-        """Fichier, filtre ou analyse : supprimables depuis l'arbre."""
+        """Fichier, filtre, analyse ou voie calculée : supprimables depuis l'arbre."""
+        if item is not None and item.item_type == itemType.RAW:
+            return getattr(item.obj, "is_computed", False)
         return item is not None and item.item_type in (itemType.FILE, itemType.FILTER,
                                                        itemType.ANALYSE)
 
-    def checkStates(self,selected=None,deletable=False):
+    def checkStates(self,selected=None,deletable=False,file_selected=False):
         if selected is not None:
 
             #? faut-il vraiment interdire l'accès aux actions si un filtre est sélectionné
@@ -237,6 +241,7 @@ class TreeController(QtCore.QObject):
                                     has_reference = has_ref,
                                     is_recording  = self.macro_recording,
                                     can_delete    = deletable,
+                                    has_file      = file_selected or has_select,
                                     )
         self.menu.update_enabled_states(states)
 

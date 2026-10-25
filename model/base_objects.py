@@ -279,9 +279,18 @@ class FileObject:
 
     def signals_from_dict(self,data, filter_factory,analyses_factory):
 
+        from model.computed import ComputedSignal
         for sig_data in data["signals"]:
-            sig = SignalObject.from_dict(self, sig_data, filter_factory,analyses_factory)
+            if "computed" in sig_data:
+                sig = ComputedSignal.from_saved(self, sig_data, filter_factory,analyses_factory)
+            else:
+                sig = SignalObject.from_dict(self, sig_data, filter_factory,analyses_factory)
             self.signals.append(sig)
+        # anciens projets : formules en analyse converties en voies calculées
+        for sig in list(self.signals):
+            for params in getattr(sig, "saved_formulas", []):
+                self.signals.append(ComputedSignal.from_formula_analysis(self, params))
+            sig.saved_formulas = []
         self.resolve_filter_references()
 
     def channel_id(self, name) -> str | None:
@@ -320,6 +329,8 @@ class SignalObject:
     grâce à un pipeline de filtres non destructif.
     """
     item_type = itemType.RAW
+    # voie calculée par une formule (model.computed.ComputedSignal)
+    is_computed = False
     PARAMETER_SCHEMA= {
                         'Curve name'    :{
                                             'type':'str',
@@ -685,6 +696,12 @@ class SignalObject:
 
 
         sig             =   SignalObject(file_obj, data["name"])
+        SignalObject._restore_nodes(sig, data, filter_factory, analysis_factory)
+        return sig
+
+    @staticmethod
+    def _restore_nodes(sig, data, filter_factory, analysis_factory):
+        """Visibilité, couleur, filtres et analyses sauvegardés d'une voie."""
         sig.visible     =   data.get("visible", True)
         sig.pen         =   custom_struct_functions.dict_to_QPen( data.get("pen"))
 
@@ -700,10 +717,14 @@ class SignalObject:
             if not node_data:
                 # anciens projets : une analyse thermique sans résultat était sauvée {}
                 continue
+            if node_data.get("type") == "FORMULA":
+                # formule en analyse (version précédente) : voie calculée du fichier,
+                # créée par FileObject.signals_from_dict
+                sig.saved_formulas = getattr(sig, "saved_formulas", []) + [node_data["params"]]
+                continue
             node = analysis_factory.create_saved(node_data)
             node.id = node_id or node.id
             sig.analyses[node.id]=node
-        return sig
 
     @staticmethod
     def _split_saved_node(entry):
@@ -809,7 +830,7 @@ class Workspace:
 
     def add_file(self, file_obj):
         self.files.append(file_obj)
-        # formules : voies des autres fichiers ([200 W:T AMB], voir FormulaAnalysis)
+        # formules : voies des autres fichiers ([200 W:T AMB], voir model.computed)
         file_obj.workspace = self
 
     def set_reference_signal(self, signal : SignalObject):

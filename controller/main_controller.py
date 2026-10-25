@@ -3,12 +3,14 @@
 
 from operator import index
 
+import json
+import os
 import uuid
 
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from PyQt6 import QtCore,QtGui,QtWidgets
+from PyQt6 import QtCore,QtGui,QtWidgets,sip
 
 from model.base_objects import (DerivedSignalObject, FileObject, SignalObject,
                                 Workspace,)
@@ -32,7 +34,11 @@ from model.channels import (MATCHING_ASK, MATCHING_MODES, MATCHING_SETTINGS, gro
 from controller.commands.channel_link import (ChannelLinkCommand, ChannelMatchingCommand,
                                               ChannelGroupsCommand)
 from ressources.custom_dialogs import ChannelMatchingDialog, FormulaDialog
-from model.analysis.formula import FormulaAnalysis
+from model.computed import ComputedSignal
+from model.formula import FormulaError
+from controller.commands.computed_channel import (AddComputedChannelCommand,
+                                                  RemoveComputedChannelCommand,
+                                                  ModifyComputedChannelCommand)
 from controller.benchmark_controller import BenchmarkController
 
 from model.tree_item import TreeItem
@@ -63,6 +69,11 @@ class MainController(QtCore.QObject):
         # vue « Par voie » : voies du modèle thermique en attente de la plage (graphique)
         self._pending_model_signals = None
         self.benchmark_ctrl = None
+        # voies calculées : état des données d'entrée lors du dernier tracé
+        self._computed_keys = {}
+        # contenu du projet au dernier enregistrement (travail non enregistré : voir
+        # is_modified) ; défini après la création du workspace
+        self._saved_state = None
 
         # Contrôleurs UI
         self.tree_ctrl      = TreeController(view.treefile)
@@ -101,6 +112,7 @@ class MainController(QtCore.QObject):
         self._connect_menu_signals()
         self._connect_cursor_signals()
         self._connect_channel_signals()
+        self._mark_saved()
 
     # -------------------------------------------------------------------------
     # MENU FILE
@@ -120,16 +132,81 @@ class MainController(QtCore.QObject):
                                                                     load_file_dialog(
                                                                     custom_types.fileType.CSV))
         self.view.actionParameters.triggered.connect( self.menu_ctrl.open_options_window)
-        self.view.actionSave_to.triggered.connect(self.save_project)
+        self.view.actionSave.triggered.connect(self.save_project)
+        self.view.actionSave_to.triggered.connect(self.save_project_as)
+        self.view.close_guard = self.confirm_discard
         self.view.actionAuto_Extract.triggered.connect(lambda: self.export_ctrl.save_to_json(
                                                                     self.workspace))
         self.view.actionQuit.triggered.connect(self.quit)
         self.view.actionBenchmark.triggered.connect(self.show_benchmark)
 
-    def save_project(self):
-        """Files > Save to : projet .json, ajouté aux fichiers récents."""
-        if self.export_ctrl.save_workspace(self.workspace):
-            self.menu_ctrl.save_recent_file_address(self.workspace.recent_file_params())
+    # -------------------------------------------------------------------------
+    # ENREGISTREMENT DU PROJET
+    # -------------------------------------------------------------------------
+    def save_project(self) -> bool:
+        """Files > Save (Ctrl+S) : dans le projet ouvert, sinon comme « Save as »."""
+        if not self.workspace.path:
+            return self.save_project_as()
+        self.workspace.save(self.workspace.path)
+        self._project_saved()
+        return True
+
+    def save_project_as(self) -> bool:
+        """Files > Save as : nouveau projet .json, ajouté aux fichiers récents."""
+        if not self.export_ctrl.save_workspace(self.workspace):
+            return False
+        self._project_saved()
+        return True
+
+    def _project_saved(self):
+        self.menu_ctrl.save_recent_file_address(self.workspace.recent_file_params())
+        self._mark_saved()
+        self.view.statusBar().showMessage(f"Projet enregistré : {self.workspace.path}", 5000)
+
+    def _snapshot(self) -> str:
+        """Contenu du projet tel qu'il serait enregistré (comparé à l'enregistrement)."""
+        return json.dumps(self.workspace.to_dict(), sort_keys=True, default=str)
+
+    def _mark_saved(self):
+        self._saved_state = self._snapshot()
+        self._update_title()
+
+    def is_modified(self) -> bool:
+        """Travail non enregistré depuis l'ouverture / le dernier enregistrement."""
+        return self._snapshot() != self._saved_state
+
+    def _update_title(self, *_):
+        if sip.isdeleted(self.view):            # fermeture du logiciel en cours
+            return
+        path = self.workspace.path
+        name = os.path.basename(path) if path else "projet non enregistré"
+        star = " *" if self.is_modified() else ""
+        self.view.setWindowTitle(f"GLViewer — {name}{star}" if path or star else "GLViewer")
+
+    def confirm_discard(self) -> bool:
+        """
+        Avant de fermer le logiciel ou d'ouvrir un autre projet : propose d'enregistrer
+        le travail non enregistré. False si l'utilisateur annule.
+        """
+        if not self.is_modified():
+            return True
+        match self._ask_unsaved_changes():
+            case "save":
+                return self.save_project()
+            case "discard":
+                return True
+            case _:
+                return False
+
+    def _ask_unsaved_changes(self) -> str:
+        """« save », « discard » ou « cancel »."""
+        name = os.path.basename(self.workspace.path) if self.workspace.path else "Le projet"
+        buttons = QtWidgets.QMessageBox.StandardButton
+        answer = QtWidgets.QMessageBox.question(
+                    self.view, "Modifications non enregistrées",
+                    f"{name} a été modifié.\nEnregistrer les modifications ?",
+                    buttons.Save | buttons.Discard | buttons.Cancel, buttons.Save)
+        return {buttons.Save: "save", buttons.Discard: "discard"}.get(answer, "cancel")
 
     def show_benchmark(self):
         """Fenêtre « Benchmark » (Options > Benchmark window), créée à la 1re ouverture."""
@@ -174,6 +251,9 @@ class MainController(QtCore.QObject):
             return
 
         self.menu_ctrl.save_recent_file_address(file_obj.get_file_loader_params())
+        # un fichier chargé n'est pas une modification à enregistrer (seules les
+        # modifications faites ensuite le sont)
+        was_saved = not self.is_modified()
         self.workspace.add_file(file_obj)
         self._choose_channel_matching()
         self.channel_model.rebuild()
@@ -187,6 +267,10 @@ class MainController(QtCore.QObject):
         # Seules les courbes du nouveau fichier sont ajoutées au graph
         self._add_file_curves(file_obj)
         self.graph_ctrl.update_vbox()
+        if was_saved:
+            self._mark_saved()
+        else:
+            self._update_title()
 
 
     def create_workspace(self,workspace:Workspace):
@@ -194,6 +278,8 @@ class MainController(QtCore.QObject):
         Remplace le workspace courant (chargement d'un projet .json) et l'attache à
         tous les contrôleurs.
         """
+        if not self.confirm_discard():
+            return
         # nettoyage du graphique de l'ancien workspace
         for sig in list(self.graph_ctrl.curves.keys()):
             self.graph_ctrl.remove_signal_curve(sig)
@@ -230,6 +316,7 @@ class MainController(QtCore.QObject):
         annotations_view.clear_annotations()
         for annotation in self.workspace.annotations.values():
             annotations_view.show_annotation(annotation)
+        self._mark_saved()
 
     def _init_workspace_model(self):
         """
@@ -274,6 +361,8 @@ class MainController(QtCore.QObject):
         self.workspace_ctrl.recording_changed.connect(self._on_recording_changed)
         # fenêtre « Benchmark » : modèles ajoutés, modifiés, annulés...
         self.workspace_ctrl.undo_stack.indexChanged.connect(self._refresh_benchmark)
+        # titre de la fenêtre : « * » tant que le travail n'est pas enregistré
+        self.workspace_ctrl.undo_stack.indexChanged.connect(self._update_title)
 
     def _connect_tree_signals(self):
         """
@@ -400,6 +489,7 @@ class MainController(QtCore.QObject):
         """
         if self.model is None:
             return
+        self._refresh_computed()
         errors = []
         for file_obj in self.workspace.files:
             for sig in file_obj.signals:
@@ -487,6 +577,9 @@ class MainController(QtCore.QObject):
         # groupes de voies, actions sur toutes les voies d'une sélection
         self.channel_ctrl.group_edit_requested.connect(self.edit_channel_groups)
         self.channel_ctrl.apply_requested.connect(self.apply_to_signals)
+        self.channel_ctrl.group_selected.connect(
+            lambda group: self.param_ctrl.load_params(
+                                SelectionContext(role=itemType.CHANNEL_GROUP, signal=group)))
         self.channel_ctrl.has_reference = lambda: self.workspace.reference_signal is not None
         self.channel_model.group_requested.connect(
             lambda keys, gid: self.edit_channel_groups("add", (gid, keys)) if gid is not None
@@ -579,9 +672,14 @@ class MainController(QtCore.QObject):
                 state = without(arg)
                 text = "Remove channels from group"
             case "rename":
-                name = self._ask_group_name("Renommer le groupe", names.get(arg, ""))
-                if not name or name == names.get(arg):
+                # arg : id du groupe (nom demandé) ou (id, nom) depuis le ParameterTree
+                gid, name = arg if isinstance(arg, tuple) else (arg, None)
+                if name is None:
+                    name = self._ask_group_name("Renommer le groupe", names.get(gid, ""))
+                name = (name or "").strip()
+                if not name or name == names.get(gid):
                     return
+                arg = gid
                 state = [(g, name if g == arg else n, k) for g, n, k in state]
                 text = f"Rename channel group {name}"
             case "delete":
@@ -685,6 +783,7 @@ class MainController(QtCore.QObject):
 
     def _on_channel_visibility(self, signals):
         """Cases à cocher de la vue « Par voie » : graphique et arbre « Par fichier »."""
+        self._update_title()
         for sig in signals:
             self.graph_ctrl.update_signal(sig)
             if self.model is not None:
@@ -699,6 +798,7 @@ class MainController(QtCore.QObject):
             sig=item.obj
         else:
             sig=item
+        self._update_title()
         self.graph_ctrl.update_signal(sig)
         self.channel_model.refresh()
         self._on_cursor_moved(self.model.cursor_x)
@@ -816,6 +916,8 @@ class MainController(QtCore.QObject):
         match item.item_type:
             case itemType.FILE:
                 self.remove_file(obj)
+            case itemType.RAW if obj.is_computed:
+                self.workspace_ctrl.undo_stack.push(RemoveComputedChannelCommand(self, obj))
             case itemType.FILTER:
                 sig = item.signal
                 self.workspace_ctrl.push(sig, ActionRequest(
@@ -983,6 +1085,19 @@ class MainController(QtCore.QObject):
         #TODO: utiliser pleinement le SelectionContext, actuellement le role de l'action
         #TODO: n'est pas utilisé
         sig=ctx.signal
+        # paramètres d'un fichier, d'une voie... : enregistrés avec le projet
+        QtCore.QTimer.singleShot(0, self._update_title)
+        if ctx.role == itemType.CHANNEL_GROUP:
+            # groupe de la vue « Par voie » : renommage annulable
+            self.edit_channel_groups("rename", (sig.id, new_params.get("name", "")))
+            # titre de l'arbre à jour (nom vide refusé : valeur précédente remise) ; différé,
+            # l'arbre ne peut pas être reconstruit pendant son propre signal
+            QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
+            return
+        if ctx.filter_id is None and ctx.analysis_id is None and getattr(sig, "is_computed",
+                                                                          False):
+            self._modify_computed_channel(ctx, new_params)
+            return
         if ctx.filter_id is None and ctx.analysis_id is None:
             sig.set_params(new_params)
             if isinstance(sig,SignalObject):
@@ -1123,6 +1238,9 @@ class MainController(QtCore.QObject):
             # fichier, filtre ou analyse : pas forcément de signal visé
             self._delete_selected_item()
             return
+        if action_type == custom_types.qSignalType.FORMULA:
+            self.add_computed_channel()
+            return
         signal = self._current_signal()
         if signal is None:
             return
@@ -1142,14 +1260,6 @@ class MainController(QtCore.QObject):
                 self.graph_ctrl.on_selection_changed(signal)
             case custom_types.qSignalType.MACRO:
                 self.workspace_ctrl.apply_macro(macro_name,signal)
-            case custom_types.qSignalType.FORMULA:
-                params = self._ask_formula(signal)
-                if params is not None:
-                    self.workspace_ctrl.push(signal, ActionRequest(
-                                    action_modifier = custom_types.ActionModifier.ADD_ACTION,
-                                    action_type     = custom_types.qSignalType.FORMULA,
-                                    params          = params,
-                                    index           = None))
             case custom_types.qSignalType.MODEL:
                 self._pending_model_signals = None
                 # la plage des données d'entrée est choisie sur le graphique avant la
@@ -1161,40 +1271,165 @@ class MainController(QtCore.QObject):
                 self.workspace_ctrl.push(signal,action_request)
 
 
-    def formula_channels(self, signal) -> list[str]:
-        """Voies insérables dans une formule créée sur signal (fichier hôte d'abord)."""
-        host = signal.file
-        channels = [f"[{s.name}]" for s in host.signals] + ["time"]
+    # -------------------------------------------------------------------------
+    # VOIES CALCULÉES (formules)
+    # -------------------------------------------------------------------------
+    def _current_file(self):
+        """Fichier visé : fichier sélectionné dans l'arbre, ou fichier de la voie."""
+        sel = self.view.treefile.selectionModel().selectedIndexes()
+        if not sel:
+            return None
+        item = sel[0].internalPointer()
+        if item.item_type == itemType.FILE:
+            return item.obj
+        sig = item.action_signal
+        return sig.file if isinstance(sig, SignalObject) else None
+
+    def add_computed_channel(self, file_obj=None, defaults=None):
+        """
+        « Add a computed channel » : nouvelle voie du fichier sélectionné (ou de la voie
+        sélectionnée, préremplie dans la formule).
+        """
+        file_obj = file_obj or self._current_file()
+        if file_obj is None:
+            return
+        sig = self._current_signal()
+        if defaults is None:
+            defaults = {"formula": f"[{sig.name}]" if sig is not None
+                                   and sig.file is file_obj else ""}
+        defaults.setdefault("name", self._free_channel_name(file_obj))
+        params = self._ask_formula(file_obj, defaults)
+        if params is None:
+            return
+        try:
+            new = ComputedSignal(file_obj, **params)
+        except ValueError as e:                 # FormulaError compris
+            QtWidgets.QMessageBox.warning(self.view, "Voie calculée", str(e))
+            return
+        self.workspace_ctrl.undo_stack.push(AddComputedChannelCommand(self, new))
+
+    @staticmethod
+    def _free_channel_name(file_obj, base="Formula") -> str:
+        names = {s.name for s in file_obj.signals}
+        n, name = 2, base
+        while name in names:
+            name, n = f"{base} {n}", n + 1
+        return name
+
+    def _attach_signal(self, sig, index):
+        """Voie calculée ajoutée (AddComputedChannelCommand) ou remise par un undo."""
+        sig.file.signals.insert(index, sig)
+        if self.model is not None:
+            self.model.insert_signal(sig, index)
+        self.graph_ctrl.add_signal_curve(sig)
+        self.channel_model.rebuild()
+        self._refresh_derived()
+        self.select_from_context(SelectionContext(role=itemType.RAW, signal=sig))
+
+    def _detach_signal(self, sig):
+        """Voie calculée supprimée (ou ajout annulé)."""
+        if self.workspace.reference_signal is sig:
+            self.workspace.set_reference_signal(None)
+            self.graph_ctrl.set_reference_signal(None)
+            self.tree_ctrl.set_reference_signal(None)
+        sig.file.signals.remove(sig)
+        if self.model is not None:
+            self.model.remove_signal(sig)
+        for derived in sig.derived_signals:
+            self.graph_ctrl.remove_signal_curve(derived)
+        self.graph_ctrl.remove_signal_curve(sig)
+        if self.param_ctrl.shows(sig.file) and getattr(self.param_ctrl, "_signal", None) is sig:
+            self.param_ctrl.clear()
+        self.channel_model.rebuild()
+        self._refresh_derived()
+
+    def _apply_signal_params(self, sig, params):
+        """Paramètres d'une voie calculée (ModifyComputedChannelCommand)."""
+        sig.set_params(params)
+        self.graph_ctrl.update_signal(sig)
+        if self.model is not None:
+            self.model.refresh_object(sig)
+        self.channel_model.rebuild()
+        self._refresh_derived()
+
+    def _modify_computed_channel(self, ctx, new_params):
+        sig = ctx.signal
+        changed = {k: v for k, v in new_params.items() if sig.get_param(k) != v}
+        if not changed:
+            return
+        formula = {k: v for k, v in changed.items() if k in sig.FORMULA_KEYS}
+        if formula:
+            ok, message = self.check_formula(sig.file, {**sig.formula_params(), **formula},
+                                             current=sig)
+            if not ok:
+                QtWidgets.QMessageBox.warning(self.view, "Voie calculée", message)
+                # valeurs précédentes remises dans l'arbre (différé : son propre signal)
+                QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
+                return
+        self.workspace_ctrl.undo_stack.push(ModifyComputedChannelCommand(self, sig, changed))
+        QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
+
+    def _refresh_computed(self):
+        """
+        Voies calculées dont une donnée d'entrée a changé (filtre sur une voie utilisée,
+        décalage d'un fichier...) : courbe et arbre redessinés.
+        """
         for file_obj in self.workspace.files:
-            if file_obj is not host:
-                prefix = file_obj.label or file_obj.name
-                channels += [f"[{prefix}:{s.name}]" for s in file_obj.signals]
+            for sig in file_obj.signals:
+                if not sig.is_computed:
+                    continue
+                key = sig.input_key()
+                if self._computed_keys.get(sig) == key:
+                    continue
+                self._computed_keys[sig] = key
+                self.graph_ctrl.update_signal(sig)
+                if self.model is not None:
+                    self.model.refresh_object(sig)
+
+    def formula_channels(self, file_obj, exclude=None) -> list[str]:
+        """Voies insérables dans une formule du fichier hôte file_obj (le sien d'abord)."""
+        host = file_obj
+        channels = [f"[{s.name}]" for s in host.signals if s is not exclude] + ["time"]
+        for other in self.workspace.files:
+            if other is not host:
+                prefix = other.label or other.name
+                channels += [f"[{prefix}:{s.name}]" for s in other.signals]
         return channels
 
     @staticmethod
-    def check_formula(signal, params) -> tuple[bool, str]:
-        """Calcul d'essai d'une formule : (valide, message affiché dans la boîte de saisie)."""
+    def check_formula(file_obj, params, current=None) -> tuple[bool, str]:
+        """
+        Calcul d'essai d'une formule du fichier hôte file_obj : (valide, message affiché
+        dans la boîte de saisie). current : voie calculée modifiée (son nom reste libre).
+        """
         if not params.get("formula"):
             return False, "Saisissez une formule."
+        params = {"name": "Formula", **params}
         try:
-            derived = FormulaAnalysis(**params).compute(signal)
+            trial = ComputedSignal(file_obj, replaces=current, **params)
+            if current is not None:
+                # la voie modifiée ne s'utilise pas elle-même (référence circulaire)
+                for sig in trial.inputs().values():
+                    if sig is current or (sig.is_computed and sig.depends_on(current)):
+                        raise FormulaError(f"Circular reference: '{current.name}' would "
+                                           f"use itself through {sig.name}")
+            x, y, warnings = trial.evaluate()
         except ValueError as e:              # FormulaError compris
             return False, str(e)
-        y = derived.y[np.isfinite(derived.y)]
+        finite = y[np.isfinite(y)]
         unit = params.get("unit", "")
-        message = f"{derived.y.size} points"
-        if y.size:
-            message += f", de {y.min():.4g} à {y.max():.4g} {unit}".rstrip()
-        if y.size < derived.y.size:
-            message += f" ({derived.y.size - y.size} valeurs non définies : nan / inf)"
-        warnings = derived.metadata.get("warnings")
+        message = f"{y.size} points"
+        if finite.size:
+            message += f", de {finite.min():.4g} à {finite.max():.4g} {unit}".rstrip()
+        if finite.size < y.size:
+            message += f" ({y.size - finite.size} valeurs non définies : nan / inf)"
         if warnings:
             message += "\n" + "\n".join(warnings)
         return True, message
 
-    def _ask_formula(self, signal, defaults=None) -> dict | None:
-        dialog = FormulaDialog(self.formula_channels(signal),
-                               lambda params: self.check_formula(signal, params),
+    def _ask_formula(self, file_obj, defaults=None) -> dict | None:
+        dialog = FormulaDialog(self.formula_channels(file_obj),
+                               lambda params: self.check_formula(file_obj, params),
                                defaults, parent=self.view)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return None
@@ -1296,12 +1531,5 @@ class MainController(QtCore.QObject):
 
 
     def quit(self):
-
-        if self.workspace_ctrl is None:
-            self.view.close()
-        else:
-            if self.workspace_ctrl.undo_stack.count() >=1:
-                self.save_project()
-                self.view.close()
-            else:
-                self.view.close()
+        # travail non enregistré : proposé à l'enregistrement (MainWindow.closeEvent)
+        self.view.close()

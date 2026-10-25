@@ -23,7 +23,7 @@ class qSignalType(Enum):
     OFFSET_X    = auto()
     MODEL       = auto()
     FFT         = auto()
-    FORMULA     = auto()    # analyse : courbe calculée par une formule
+    FORMULA     = auto()    # voie calculée par une formule (model.computed)
     DEL         = auto()
     SELECT      = auto()
     CHECK       = auto()

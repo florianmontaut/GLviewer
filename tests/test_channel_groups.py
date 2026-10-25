@@ -297,3 +297,41 @@ def test_project_keeps_groups(ctrl, files, names, tmp_path):
     ctrl.workspace.save(project)
     ctrl.import_ctrl.openProject(str(project))
     assert _top(ctrl) == [("Thermique (1 voie(s))", ["CH2 (2)"]), ("CH1 (2)", None)]
+
+
+# ---------------- ParameterTree du groupe ----------------
+
+def _select_group(ctrl, row=0):
+    ctrl.view.treechannels.setCurrentIndex(ctrl.channel_model.index(row, 0))
+
+
+def test_group_selection_fills_parameter_tree(ctrl, files, names):
+    names.append("Thermique")
+    ctrl.edit_channel_groups("new", [_key(ctrl, "CH1")])
+    _select_group(ctrl)
+    assert ctrl.param_ctrl.param.name() == "Thermique"
+    assert ctrl.param_ctrl.param.child("Name").value() == "Thermique"
+
+
+def test_rename_group_from_parameter_tree_and_undo(ctrl, files, names, qapp):
+    names.append("Thermique")
+    ctrl.edit_channel_groups("new", [_key(ctrl, "CH1")])
+    _select_group(ctrl)
+    ctrl.param_ctrl.param.child("Name").setValue("Bobinages")
+    qapp.processEvents()
+    assert _top(ctrl)[0] == ("Bobinages (1 voie(s))", ["CH1 (2)"])
+    assert ctrl.param_ctrl.param.name() == "Bobinages"          # titre de l'arbre à jour
+    _undo(ctrl)
+    assert ctrl.workspace.channel_groups[0].name == "Thermique"
+
+
+def test_empty_name_refused(ctrl, files, names, qapp):
+    names.append("Thermique")
+    ctrl.edit_channel_groups("new", [_key(ctrl, "CH1")])
+    _select_group(ctrl)
+    count = ctrl.workspace_ctrl.undo_stack.count()
+    ctrl.param_ctrl.param.child("Name").setValue("   ")
+    qapp.processEvents()
+    assert ctrl.workspace.channel_groups[0].name == "Thermique"
+    assert ctrl.workspace_ctrl.undo_stack.count() == count
+    assert ctrl.param_ctrl.param.child("Name").value() == "Thermique"   # valeur remise

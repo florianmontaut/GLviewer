@@ -90,10 +90,25 @@ class UserGroup:
     channels:   list = field(default_factory=list, repr=False)
 
     item_type = itemType.CHANNEL_GROUP
+    # ParameterTree (sélection du groupe dans la vue « Par voie ») : renommage
+    PARAMETER_SCHEMA = {
+        "Name": {
+                    "type": "str",
+                    "default": "",
+                    "key": "name",
+                },
+    }
+    opts_dict = {"Name": "name"}
 
     @property
     def display_name(self) -> str:
         return self.name
+
+    def get_param(self, key):
+        return getattr(self, key)
+
+    def get_params(self) -> dict:
+        return {"name": self.name}
 
     @property
     def signals(self) -> list:

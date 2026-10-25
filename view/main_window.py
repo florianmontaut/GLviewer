@@ -20,12 +20,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
         self.treefile : QtWidgets.QTreeView
         self._init_tree_tabs()
+        # enregistrement du projet ouvert (Ctrl+S) ; « Save to » devient « Save as »
+        self.actionSave = QtGui.QAction("Save", self)
+        self.actionSave.setShortcut(QtGui.QKeySequence.StandardKey.Save)
+        self.menuFiles.insertAction(self.actionSave_to, self.actionSave)
+        self.actionSave_to.setText("Save as...")
+        self.actionSave_to.setShortcut(QtGui.QKeySequence.StandardKey.SaveAs)
+        # fermeture de la fenêtre : callable() -> bool, False pour l'annuler (travail non
+        # enregistré, voir MainController.confirm_discard)
+        self.close_guard = None
         # comparaison des essais (modèles thermiques) : fenêtre à part
         self.actionBenchmark = QtGui.QAction("Benchmark window", self)
         self.menuOptions.addAction(self.actionBenchmark)
         self.default_dir=os.path.dirname(__file__)
         #lastest_dir sera mis à jour 
         self.latest_dir=os.path.dirname(__file__)
+
+    def closeEvent(self, event):
+        if self.close_guard is not None and not self.close_guard():
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     def _init_tree_tabs(self):
         """

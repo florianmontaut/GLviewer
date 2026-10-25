@@ -194,8 +194,7 @@ class WorkspaceController(QtCore.QObject):
 
         if action_request.action_type in (  qSignalType.MODEL,
                                             qSignalType.FFT,
-                                            qSignalType.DIFF_EXT,
-                                            qSignalType.FORMULA):
+                                            qSignalType.DIFF_EXT):
             #TODO: pourquoi ne pas directement passer le node plutôt que se trainer une solution bancale
             analysis_id = sig.get_analysis_id_by_index(index)
             ctx = SelectionContext(

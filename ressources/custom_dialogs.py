@@ -1215,6 +1215,10 @@ class FormulaDialog(QDialog):
         self.time_base.currentTextChanged.connect(self._update)
         self.period.valueChanged.connect(self._update)
         self._update()
+        # saisie à la suite de la voie préremplie (ex: « [CH3] » puis « *2 »)
+        self.formula.setFocus()
+        self.formula.deselect()
+        self.formula.end(False)
 
     def _insert(self, text):
         self.formula.insert(text)

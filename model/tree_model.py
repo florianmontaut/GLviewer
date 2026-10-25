@@ -110,6 +110,34 @@ class PipelineTreeModel(QAbstractItemModel):
             # l'analyse et ses signaux DÉRIVÉS
             sig_item.add_child(self._make_node_item(sig, analysis, sig_item))
 
+    def insert_signal(self, sig, row: int | None = None):
+        """Ajoute une voie (voie calculée) sous son fichier, à la position row."""
+        file_item = self.find_item(self.root, sig.file)
+        if file_item is None:
+            return
+        if row is None or row > file_item.child_count():
+            row = file_item.child_count()
+        self.beginInsertRows(self.index_from_item(file_item), row, row)
+        sig_item = TreeItem(sig, parent=file_item)
+        file_item.insert_child(row, sig_item)
+        for node in sig.pipeline.values():
+            sig_item.add_child(TreeItem(node, parent=sig_item))
+        for analysis in sig.analyses.values():
+            sig_item.add_child(self._make_node_item(sig, analysis, sig_item))
+        self.endInsertRows()
+        if self.cursor_x is not None:
+            self.updateCursorVal(self.cursor_x)
+
+    def remove_signal(self, sig):
+        """Retire une voie (voie calculée) de l'arbre."""
+        item = self.find_item(self.root, sig)
+        if item is None:
+            return
+        row = item.row()
+        self.beginRemoveRows(self.index_from_item(item.parent_item), row, row)
+        item.parent_item.children.pop(row)
+        self.endRemoveRows()
+
     def remove_file_subtree(self, file_obj):
         """
         Supprime un FileObject du modèle Qt proprement.
@@ -208,6 +236,18 @@ class PipelineTreeModel(QAbstractItemModel):
                 return f"{obj.display_name} ⚠"
             if role == Qt.ItemDataRole.ToolTipRole:
                 return f"Analyse non recalculée : {obj.error}"
+
+        # voie calculée : ƒ, formule en infobulle, échec du calcul signalé
+        if obj_type == itemType.RAW and getattr(obj, "is_computed", False):
+            if role == Qt.ItemDataRole.DisplayRole and col == 0:
+                return f"ƒ {obj.name}" + (" ⚠" if obj.error else "")
+            if role == Qt.ItemDataRole.ToolTipRole:
+                tip = f"{obj.name} = {obj.formula}"
+                if obj.error:
+                    tip += f"\nCalcul impossible : {obj.error}"
+                if obj.warnings:
+                    tip += "\n" + "\n".join(obj.warnings)
+                return tip
 
         # fichier : nom + point de fonctionnement, chemin en infobulle
         if obj_type == itemType.FILE:

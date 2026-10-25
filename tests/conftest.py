@@ -81,6 +81,9 @@ def ctrl(qapp, qt_errors, warnings_shown, dialogs_opened, tmp_path, monkeypatch)
 
     window = MainWindow()
     controller = MainController(window, custom_viewer_settings.params)
+    # travail non enregistré (ouverture d'un projet, fermeture) : abandonné sans question
+    # (boîte bloquante) ; tests/test_save_project.py remplace cette réponse
+    monkeypatch.setattr(controller, "_ask_unsaved_changes", lambda: "discard")
     yield controller
     window.close()
 

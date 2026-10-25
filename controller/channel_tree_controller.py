@@ -30,6 +30,8 @@ class ChannelTreeController(QtCore.QObject):
     group_edit_requested = QtCore.pyqtSignal(str, object)
     # menu contextuel : (voies affichées de la sélection, qSignalType)
     apply_requested = QtCore.pyqtSignal(object, object)
+    # groupe sélectionné : ses paramètres (nom) dans le ParameterTree
+    group_selected = QtCore.pyqtSignal(object)
 
     def __init__(self, tree: QtWidgets.QTreeView):
         super().__init__()
@@ -84,6 +86,10 @@ class ChannelTreeController(QtCore.QObject):
     def _on_selection_changed(self, selected, deselected):
         indexes = selected.indexes()
         if not indexes:
+            return
+        obj = indexes[0].internalPointer().obj
+        if obj.item_type == itemType.CHANNEL_GROUP:
+            self.group_selected.emit(obj)
             return
         ctx = indexes[0].internalPointer().to_selection_context()
         if ctx is not None:
