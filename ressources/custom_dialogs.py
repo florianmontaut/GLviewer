@@ -1160,9 +1160,10 @@ class FormulaDialog(QDialog):
             check    : callable(params) -> (formule valide, message)
             defaults : paramètres initiaux (formula, name, unit, time_base, period)
         """
-        from PyQt6.QtWidgets import QComboBox, QListWidget, QHBoxLayout
+        from PyQt6.QtWidgets import QComboBox, QListWidget, QHBoxLayout, QPushButton
         super().__init__(parent)
         self.setWindowTitle("Add a formula")
+        self.channel_names = list(channels)
         self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
         self.resize(620, 460)
         self.check = check
@@ -1203,9 +1204,17 @@ class FormulaDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
-        layout.addWidget(QLabel("Voies (double-clic pour insérer) — fonctions : sin, cos, "
-                                "tan, exp, log, log10, sqrt, abs, max, min, sum, avg "
-                                "(arguments séparés par ;)"))
+        help_row = QHBoxLayout()
+        help_label = QLabel("Voies (double-clic pour insérer) — fonctions : sin, cos, "
+                            "tan, exp, log, log10, sqrt, abs, max, min, sum, avg, "
+                            "steps, interp (arguments séparés par ;)")
+        help_label.setWordWrap(True)
+        help_row.addWidget(help_label, 1)
+        # table de correspondance (ex: puissance par paliers) : steps(...) / interp(...)
+        self.table_button = QPushButton("Insérer une table…")
+        self.table_button.clicked.connect(self._insert_table)
+        help_row.addWidget(self.table_button)
+        layout.addLayout(help_row)
         layout.addWidget(self.channels, 1)
         layout.addWidget(self.message)
         layout.addWidget(self.buttons)
@@ -1224,6 +1233,12 @@ class FormulaDialog(QDialog):
         self.formula.insert(text)
         self.formula.setFocus()
 
+    def _insert_table(self):
+        """Éditeur de table : l'appel steps(...) / interp(...) est inséré au curseur."""
+        dialog = LutDialog(self.channel_names, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._insert(dialog.call())
+
     def params(self) -> dict:
         return {"formula": self.formula.text().strip(), "name": self.name.text().strip()
                 or "Formula", "unit": self.unit.text().strip(),
@@ -1235,3 +1250,162 @@ class FormulaDialog(QDialog):
         self.message.setText(message)
         self.message.setStyleSheet("" if ok else "color: #c0392b")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+
+
+class LutDialog(QDialog):
+    """
+    Table de correspondance (look-up table) insérée dans une formule : paliers
+    steps(x; x1; y1...) ou interpolation interp(x; x1; y1...). Les lignes se saisissent
+    ou se collent depuis Excel (Ctrl+V, deux colonnes).
+    """
+
+    STEPS, INTERP = "steps", "interp"
+
+    def __init__(self, channels: list = (), parent=None):
+        """
+        Args:
+            channels : entrées proposées (time, [T AMB]...) ; time par défaut
+        """
+        from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QPushButton, QHeaderView
+        from model.formula import lut
+        super().__init__(parent)
+        self.lut = lut
+        self.setWindowTitle("Look-up table")
+        self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
+        self.resize(460, 480)
+
+        self.input = QComboBox()
+        self.input.setEditable(True)
+        self.input.addItems(["time"] + [c for c in channels if c != "time"])
+        self.steps_mode = QRadioButton("Paliers : la valeur s'applique à partir de x")
+        self.interp_mode = QRadioButton("Interpolation linéaire entre les points")
+        self.steps_mode.setChecked(True)
+
+        self.table = QTableWidget(2, 2)
+        self.table.setHorizontalHeaderLabels(["x (ex : début du palier, s)", "Valeur"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        paste = QtGui.QShortcut(QtGui.QKeySequence.StandardKey.Paste, self.table)
+        paste.setContext(QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        paste.activated.connect(self.paste_clipboard)
+
+        add_row = QPushButton("Ajouter une ligne")
+        add_row.clicked.connect(lambda: self.table.insertRow(self.table.rowCount()))
+        remove_row = QPushButton("Supprimer la ligne")
+        remove_row.clicked.connect(self._remove_row)
+        paste_button = QPushButton("Coller (Excel)")
+        paste_button.clicked.connect(self.paste_clipboard)
+        buttons_row = QHBoxLayout()
+        for button in (add_row, remove_row, paste_button):
+            buttons_row.addWidget(button)
+
+        self.message = QLabel()
+        self.message.setWordWrap(True)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                        QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        form = QFormLayout()
+        form.addRow("Entrée x :", self.input)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(self.steps_mode)
+        layout.addWidget(self.interp_mode)
+        layout.addWidget(self.table, 1)
+        layout.addLayout(buttons_row)
+        layout.addWidget(QLabel("Avant la 1re ligne : valeur manquante ; après la dernière : "
+                                "dernière valeur (ajoutez une ligne pour revenir à 0)."))
+        layout.addWidget(self.message)
+        layout.addWidget(self.buttons)
+
+        self.table.itemChanged.connect(self._update)
+        self.table.model().rowsRemoved.connect(self._update)
+        self.input.currentTextChanged.connect(self._update)
+        self.steps_mode.toggled.connect(self._update)
+        self._update()
+
+    # ---------------- saisie ----------------
+
+    def _remove_row(self):
+        rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
+        for row in rows or [self.table.rowCount() - 1]:
+            if row >= 0:
+                self.table.removeRow(row)
+
+    def set_rows(self, rows, start: int = 0):
+        """Remplit le tableau à partir de la ligne start (lignes ajoutées au besoin)."""
+        with QtCore.QSignalBlocker(self.table):
+            self.table.setRowCount(max(self.table.rowCount(), start + len(rows)))
+            for r, row in enumerate(rows, start=start):
+                for c, value in enumerate(row):
+                    self.table.setItem(r, c, QTableWidgetItem(self.lut.format_number(value)))
+        self._update()
+
+    def paste_text(self, text: str):
+        """Lignes collées depuis Excel, à partir de la ligne courante (ou vide)."""
+        try:
+            rows = self.lut.parse_rows(text)
+        except ValueError as e:
+            self._show(False, str(e))
+            return
+        start = self.table.currentRow()
+        self.set_rows(rows, start if start >= 0 else self._first_empty_row())
+
+    def paste_clipboard(self):
+        self.paste_text(QtGui.QGuiApplication.clipboard().text())
+
+    def _cell(self, row, col) -> str:
+        item = self.table.item(row, col)
+        return item.text().strip() if item is not None else ""
+
+    def _row_is_filled(self, row) -> bool | None:
+        """True : ligne complète, None : partielle, False : vide."""
+        cells = [self._cell(row, 0), self._cell(row, 1)]
+        return True if all(cells) else (None if any(cells) else False)
+
+    def _first_empty_row(self) -> int:
+        filled = [r for r in range(self.table.rowCount()) if self._row_is_filled(r) is not False]
+        return filled[-1] + 1 if filled else 0
+
+    # ---------------- résultat ----------------
+
+    @property
+    def function(self) -> str:
+        return self.STEPS if self.steps_mode.isChecked() else self.INTERP
+
+    def rows(self) -> list[tuple[float, float]]:
+        """Lignes saisies (vides ignorées) ; ValueError si la table est invalide."""
+        rows = []
+        for r in range(self.table.rowCount()):
+            filled = self._row_is_filled(r)
+            if filled is False:
+                continue
+            try:
+                if filled is None:
+                    raise ValueError
+                rows.append((self.lut.parse_number(self._cell(r, 0)),
+                             self.lut.parse_number(self._cell(r, 1))))
+            except ValueError:
+                raise ValueError(f"Ligne {r + 1} : deux nombres attendus") from None
+        if not rows:
+            raise ValueError("Saisissez au moins une ligne (x, valeur).")
+        xs = [x for x, _ in rows]
+        if any(b <= a for a, b in zip(xs, xs[1:])):
+            raise ValueError("Les x doivent être strictement croissants.")
+        return rows
+
+    def call(self) -> str:
+        """Appel inséré dans la formule, ex : steps(time; 0; 200; 201; 800)."""
+        return self.lut.format_call(self.function, self.input.currentText().strip() or "time",
+                                    self.rows())
+
+    def _show(self, ok: bool, message: str):
+        self.message.setText(message)
+        self.message.setStyleSheet("" if ok else "color: #c0392b")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+
+    def _update(self, *_):
+        try:
+            self._show(True, self.call())
+        except ValueError as e:
+            self._show(False, str(e))

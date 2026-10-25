@@ -19,6 +19,9 @@ Désignation des voies :
     [200 W:T AMB]   voie d'un autre fichier, désigné par son étiquette ou son nom
     CH3             voie du fichier hôte par son numéro (GL) ou par un nom sans espace
     time            temps (s)
+
+Tables de correspondance (model.formula.lut) : steps(time; 0; 200; 201; 800) donne une
+puissance par paliers, interp([V]; 0; -40; 5; 150) une courbe d'étalonnage.
 """
 import numpy as np
 
@@ -54,6 +57,8 @@ class ComputedSignal(SignalObject):
                             "description": "Voies entre crochets : [T AMB], [200 W:T AMB] "
                                             "(autre fichier) ; time : temps (s) ; fonctions "
                                             "sin, cos, exp, log, sqrt, abs, max, min, avg... ;"
+                                            " tables : steps(time; 0; 200; 201; 800) "
+                                            "(paliers), interp(x; x1; y1; x2; y2...) ;"
                                             " arguments séparés par ;",
                         },
         'Curve unit':   {

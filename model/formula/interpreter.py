@@ -4,6 +4,7 @@ import numpy as np
 from .nodes import *
 from .values import *
 from .errors import FormulaError
+from . import lut
 
 CONSTANTS = {'pi': np.pi, 'e': np.e}
 
@@ -108,6 +109,12 @@ class Interpreter:
             'avg': (lambda x: _nan_reduction(np.nanmean)(x[0]) if len(x) == 1
                               else reduce(np.add, x) / len(x), None)
         }
+
+        if func in lut.LUT_FUNCTIONS:
+            # table de correspondance : vérifiée avant le calcul (message explicite)
+            xs, ys = lut.check_table(func, args)
+            evaluate = getattr(lut, func)
+            return self.compute(func, lambda x: evaluate(x[0], xs, ys), args[:1])
 
         if func not in table:
             raise FormulaError(f"Unknown function '{func}'")
