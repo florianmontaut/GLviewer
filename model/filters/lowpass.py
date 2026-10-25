@@ -1,8 +1,10 @@
 
 # model/filters/lowpass.py
 
+import numpy as np
 from scipy.signal import butter, filtfilt
 from .base_filter import FilterNode
+from model.missing_data import fill_gaps
 from ressources.custom_types import qSignalType
 
 
@@ -76,4 +78,11 @@ class LowPassFilter(FilterNode):
     def apply(self, x, y):
 
         b, a = butter(self.get_param('order'), self.get_param('cutoff')/(0.5*self.get_param('fs')))
-        return filtfilt(b, a, y)
+        # filtfilt propage un NaN à tout le signal : les trous sont comblés le temps du
+        # filtrage, puis remis (données manquantes, voir model.missing_data)
+        filled, missing = fill_gaps(x, y)
+        if missing.all():
+            return filled.copy()
+        out = filtfilt(b, a, filled)
+        out[missing] = np.nan
+        return out

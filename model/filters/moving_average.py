@@ -20,12 +20,23 @@ class MovingAverageFilter(FilterNode):
 
     def validate(self, params):
         if not isinstance(params['window'], int):
-            raise ValueError("Offset must be numeric")
+            raise ValueError("Window must be an integer")
 
     @property
     def display_name(self) -> str:
         return f"MovingAvg({self.get_param('window')})"
 
     def apply(self, x, y):
+        # moyenne des seuls échantillons valides de la fenêtre : les données manquantes
+        # (NaN) ne contaminent pas leurs voisines, et les bords du signal ne sont plus
+        # tirés vers 0 (np.convolve complétait la fenêtre par des zéros)
         w = self.get_param('window')
-        return np.convolve(y, np.ones(w)/w, mode="same")
+        y = np.asarray(y, dtype=float)
+        valid = np.isfinite(y)
+        kernel = np.ones(w)
+        total = np.convolve(np.where(valid, y, 0.0), kernel, mode="same")
+        count = np.convolve(valid.astype(float), kernel, mode="same")
+        with np.errstate(invalid="ignore", divide="ignore"):
+            out = total / count
+        out[~valid] = np.nan
+        return out

@@ -6,6 +6,7 @@ from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
 from model.base_objects import SignalObject,DerivedSignalObject
+from model.missing_data import display_values
 from ressources import custom_graph_functions,custom_types,custom_items,custom_menu
 
 from controller.graph_context_menu_controller import GraphContextMenu
@@ -233,7 +234,10 @@ class GraphController(QtCore.QObject):
         "downsample_ratio"     : 10,
         "downsample_type"      : "peak",
         "background_color"     :"#FFFFFF",
-        "dark_mode"            : False
+        "dark_mode"            : False,
+        # données manquantes (NaN) : interruption de la courbe ou valeur de remplacement
+        "missing_display"      : self.MISSING_GAP,
+        "missing_value"        : -20.0,
         }
 
 
@@ -249,6 +253,20 @@ class GraphController(QtCore.QObject):
         self._context_scene_pos = None
         self.plot.scene().sigMouseClicked.connect(self._remember_context_click)
 
+    # option « Missing data > Display » (Options > Graph settings)
+    MISSING_GAP = "Gap in the curve"
+
+    @property
+    def missing_placeholder(self) -> float | None:
+        """Valeur affichée à la place des données manquantes (None : courbe interrompue)."""
+        if self.opts.get("missing_display", self.MISSING_GAP) == self.MISSING_GAP:
+            return None
+        return float(self.opts.get("missing_value", -20.0))
+
+    def _display_y(self, sig):
+        """Ordonnées tracées : données du signal, données manquantes selon l'option."""
+        return display_values(sig.y, self.missing_placeholder)
+
     @property
     def mouse_pos(self):
         return self._mouse_pos #x = float(mouse_point.x())
@@ -257,8 +275,14 @@ class GraphController(QtCore.QObject):
     #! à revoir, en l'état si le fichier .JSON n'est pas conforme, ça peut planter le graph_ctrl
     #! peut-être faire une validation plus poussée dans le menu_controller avant d'appeler updateOptions
     def updateOptions(self,opts=None):
+        missing_before = self.missing_placeholder
         if opts is not None:
             self.opts.update(opts)
+        if self.missing_placeholder != missing_before:
+            # affichage des données manquantes modifié : toutes les courbes redessinées
+            for sig, curve in self.curves.items():
+                curve.setData(sig.x, self._display_y(sig))
+            self.update_vbox()
 
         if self.opts["downsample"]:
             self.plot.setDownsampling(mode=self.opts["downsample_type"],
@@ -279,7 +303,8 @@ class GraphController(QtCore.QObject):
         self.yp_axis.setTickSpacing(yticks[0], yticks[1])
         self.graph.setBackground(self.opts["background_color"])
         self.plot.showGrid(x = self.opts["X_grid"], y = self.opts["Y_grid"],alpha = 0.4)
-        self.graph_tree_ctrl.update_settings(opts)
+        # options complètes (opts peut n'en contenir qu'une partie)
+        self.graph_tree_ctrl.update_settings(self.opts)
 
 
     def _init_graph(self):
@@ -360,7 +385,9 @@ class GraphController(QtCore.QObject):
         bounds = []
         for sig in visible:
             x = np.asarray(sig.x, dtype=float)
-            y = np.asarray(sig.y, dtype=float)
+            # valeur de remplacement des données manquantes comprise : elle doit rester
+            # visible
+            y = np.asarray(self._display_y(sig), dtype=float)
             if np.isfinite(x).any() and np.isfinite(y).any():
                 bounds.append((np.nanmin(x), np.nanmax(x), np.nanmin(y), np.nanmax(y)))
         if not bounds:
@@ -394,7 +421,7 @@ class GraphController(QtCore.QObject):
     def add_signal_curve(self, sig: SignalObject|DerivedSignalObject):
 
         if sig not in self.curves.keys():
-            curve = SignalCurveItem(sig.x, sig.y, pen=sig.pen)
+            curve = SignalCurveItem(sig.x, self._display_y(sig), pen=sig.pen)
             # voie décochée (HZ détectée à l'import, choix sauvegardé dans le projet...)
             curve.setVisible(sig.visible)
             curve.setCurveClickable(True)
@@ -446,7 +473,7 @@ class GraphController(QtCore.QObject):
         if sig not in self.curves:
             return
         curve = self.curves[sig]
-        curve.setData(sig.x, sig.y)
+        curve.setData(sig.x, self._display_y(sig))
         # la courbe sélectionnée reste mise en évidence
         self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
         curve.setVisible(sig.visible)

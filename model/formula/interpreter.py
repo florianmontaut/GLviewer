@@ -23,6 +23,15 @@ def _reduce_or_elementwise(single, elementwise):
     # n arguments : élément par élément entre eux -> max(CH1;0) = CH1 écrêté à 0
     return lambda x: single(x[0]) if len(x) == 1 else reduce(elementwise, x)
 
+def _nan_reduction(fn):
+    # réduction sur les seules valeurs définies ; nan si aucune ne l'est (nansum
+    # renverrait 0 pour un signal entièrement manquant)
+    def reduction(x):
+        if np.all(np.isnan(x)):
+            return np.nan
+        return fn(x)
+    return reduction
+
 class Interpreter:
     def __init__(self): self.vars = dict(CONSTANTS)
 
@@ -91,10 +100,13 @@ class Interpreter:
             'log10': (lambda x: np.log10(x[0]), 1),
             'sqrt': (lambda x: np.sqrt(x[0]), 1),
             'abs': (lambda x: np.abs(x[0]), 1),
-            'max': (_reduce_or_elementwise(np.max, np.maximum), None),
-            'min': (_reduce_or_elementwise(np.min, np.minimum), None),
-            'sum': (_reduce_or_elementwise(np.sum, np.add), None),
-            'avg': (lambda x: np.mean(x[0]) if len(x) == 1 else reduce(np.add, x) / len(x), None)
+            # réductions : données manquantes (nan) ignorées ; élément par élément, un
+            # échantillon manquant reste manquant
+            'max': (_reduce_or_elementwise(_nan_reduction(np.nanmax), np.maximum), None),
+            'min': (_reduce_or_elementwise(_nan_reduction(np.nanmin), np.minimum), None),
+            'sum': (_reduce_or_elementwise(_nan_reduction(np.nansum), np.add), None),
+            'avg': (lambda x: _nan_reduction(np.nanmean)(x[0]) if len(x) == 1
+                              else reduce(np.add, x) / len(x), None)
         }
 
         if func not in table:

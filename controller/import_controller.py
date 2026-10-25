@@ -251,8 +251,9 @@ class ImportController(QtCore.QObject):
                         check_table.append(self.isChannelValid(df[col],
                                                             channels_span,
                                                             active=self.opts["remove_overrange"]))
-                    #remplacement des 'burnout' et tout autre éléments qui n'est pas un float:
-                    df=df.fillna(-20)
+                    # 'BURNOUT' et tout autre élément qui n'est pas un nombre restent des
+                    # données manquantes (NaN, voir model.missing_data) : exclues des
+                    # calculs, affichées selon l'option « Missing data » du graphique
             #insertion d'une colonne Time en première position dans le dataframe
             df.insert(  loc=0,
                         column='Time',

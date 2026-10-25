@@ -222,6 +222,25 @@ params={
                                                         },
                                                     },
                                     },
+                                    # données manquantes (BURNOUT, cellule vide...) : les
+                                    # calculs les excluent toujours, seul l'affichage change
+                                    "Missing data": {
+                                        "type": "group",
+                                        "children": {
+                                                    "Display": {
+                                                        "type": "list",
+                                                        "default": "Gap in the curve",
+                                                        "limits": ["Gap in the curve",
+                                                                   "Placeholder value"],
+                                                        "key": "missing_display",
+                                                    },
+                                                    "Placeholder value": {
+                                                        "type": "float",
+                                                        "default": -20.0,
+                                                        "key": "missing_value",
+                                                    },
+                                                    },
+                                    },
                                     "Appearance": {
                                         "type": "group",
                                         "children": {

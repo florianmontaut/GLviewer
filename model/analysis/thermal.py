@@ -116,6 +116,7 @@ class ThermalModelAnalysis(AnalysisNode):
         self.t_start = None
         self.t_end = None
         self.results: custom_items.ThermalFitResult | None = None
+        self._x_origin = None
         self._x_fitted = None
         self._y_fitted = None
         self._x_model = None
@@ -149,12 +150,14 @@ class ThermalModelAnalysis(AnalysisNode):
             raise RuntimeError("Fit range not defined")
 
         # --- Troncature ---
-        mask = (x >= self.t_start) & (x <= self.t_end)
-        x_fit = x[mask] - x[mask][0]   # temps relatif
-        y_fit = y[mask]
-
-        if len(x_fit) < 5:
+        # données manquantes (NaN) exclues du fit
+        mask = (x >= self.t_start) & (x <= self.t_end) & np.isfinite(y)
+        if np.count_nonzero(mask) < 5:
             raise RuntimeError("Not enough data points for fitting")
+        # origine du temps relatif : premier point utilisé (voir compute)
+        self._x_origin = float(x[mask][0])
+        x_fit = x[mask] - self._x_origin
+        y_fit = y[mask]
 
         # --- Valeurs initiales ---
         T0 = y_fit[0]
@@ -332,8 +335,9 @@ class ThermalModelAnalysis(AnalysisNode):
 
         x_model, y_model = self.generate_model_curve()
 
-        # Décalage temporel si nécessaire
-        x_model = x_model + self.t_start
+        # temps relatif du modèle -> temps affiché : origine du fit (premier point
+        # valide de la plage, après t_start si les premiers échantillons manquent)
+        x_model = x_model + self._x_origin
 
         name = f"{parent_signal.name} (model RC)"
 

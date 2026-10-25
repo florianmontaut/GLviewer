@@ -5,6 +5,7 @@ import pyqtgraph as pg
 from scipy.interpolate import interp1d
 
 from .base_analysis import AnalysisNode
+from model.missing_data import valid_on
 from ..base_objects import SignalObject,DerivedSignalObject
 from ressources import custom_types
 class DiffSignalAnalysis(AnalysisNode):
@@ -148,12 +149,21 @@ class DiffSignalAnalysis(AnalysisNode):
 
         interp_type = self.get_param("interp")
 
+        # données manquantes : interpolation sur les seuls points valides (un NaN
+        # contaminerait tout le signal avec une interpolation cubique), puis les instants
+        # tombant dans un trou restent manquants
+        t_src, y_src = np.asarray(t_src, dtype=float), np.asarray(y_src, dtype=float)
+        valid = np.isfinite(y_src)
+        if valid.sum() < 2:
+            return np.full(len(t_target), np.nan)
         f = interp1d(
-                        t_src,
-                        y_src,
+                        t_src[valid],
+                        y_src[valid],
                         kind=interp_type,
                         bounds_error=False,
                         fill_value="extrapolate",
                     )
-
-        return f(t_target)
+        y_target = f(t_target)
+        if not valid.all():
+            y_target[~valid_on(t_src, y_src, t_target)] = np.nan
+        return y_target

@@ -474,8 +474,9 @@ class SignalObject:
 
     def nearest_value(self, x: float):
         """
-        Valeur (après filtres) de l'échantillon le plus proche de l'instant x, ou None.
-        Recherche dichotomique : l'axe des temps est croissant.
+        Valeur (après filtres) de l'échantillon le plus proche de l'instant x, ou None
+        (pas d'échantillon, ou échantillon manquant). Recherche dichotomique : l'axe des
+        temps est croissant.
         """
         xs = self.x
         if len(xs) == 0:
@@ -486,7 +487,8 @@ class SignalObject:
             i = len(xs) - 1
         elif i > 0 and abs(xs[i-1] - x) <= abs(xs[i] - x):
             i -= 1
-        return float(ys[i])
+        value = float(ys[i])
+        return value if np.isfinite(value) else None
 
     @property
     def is_modified(self):
