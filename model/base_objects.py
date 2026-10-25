@@ -809,6 +809,8 @@ class Workspace:
 
     def add_file(self, file_obj):
         self.files.append(file_obj)
+        # formules : voies des autres fichiers ([200 W:T AMB], voir FormulaAnalysis)
+        file_obj.workspace = self
 
     def set_reference_signal(self, signal : SignalObject):
         # désactiver l’ancienne référence

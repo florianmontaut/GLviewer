@@ -5,6 +5,7 @@ from operator import index
 
 import uuid
 
+import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PyQt6 import QtCore,QtGui,QtWidgets
@@ -30,7 +31,8 @@ from model.channels import (MATCHING_ASK, MATCHING_MODES, MATCHING_SETTINGS, gro
                             same_grouping)
 from controller.commands.channel_link import (ChannelLinkCommand, ChannelMatchingCommand,
                                               ChannelGroupsCommand)
-from ressources.custom_dialogs import ChannelMatchingDialog
+from ressources.custom_dialogs import ChannelMatchingDialog, FormulaDialog
+from model.analysis.formula import FormulaAnalysis
 from controller.benchmark_controller import BenchmarkController
 
 from model.tree_item import TreeItem
@@ -1140,6 +1142,14 @@ class MainController(QtCore.QObject):
                 self.graph_ctrl.on_selection_changed(signal)
             case custom_types.qSignalType.MACRO:
                 self.workspace_ctrl.apply_macro(macro_name,signal)
+            case custom_types.qSignalType.FORMULA:
+                params = self._ask_formula(signal)
+                if params is not None:
+                    self.workspace_ctrl.push(signal, ActionRequest(
+                                    action_modifier = custom_types.ActionModifier.ADD_ACTION,
+                                    action_type     = custom_types.qSignalType.FORMULA,
+                                    params          = params,
+                                    index           = None))
             case custom_types.qSignalType.MODEL:
                 self._pending_model_signals = None
                 # la plage des données d'entrée est choisie sur le graphique avant la
@@ -1150,6 +1160,45 @@ class MainController(QtCore.QObject):
                 action_request=self._build_action_request(signal,action_type)
                 self.workspace_ctrl.push(signal,action_request)
 
+
+    def formula_channels(self, signal) -> list[str]:
+        """Voies insérables dans une formule créée sur signal (fichier hôte d'abord)."""
+        host = signal.file
+        channels = [f"[{s.name}]" for s in host.signals] + ["time"]
+        for file_obj in self.workspace.files:
+            if file_obj is not host:
+                prefix = file_obj.label or file_obj.name
+                channels += [f"[{prefix}:{s.name}]" for s in file_obj.signals]
+        return channels
+
+    @staticmethod
+    def check_formula(signal, params) -> tuple[bool, str]:
+        """Calcul d'essai d'une formule : (valide, message affiché dans la boîte de saisie)."""
+        if not params.get("formula"):
+            return False, "Saisissez une formule."
+        try:
+            derived = FormulaAnalysis(**params).compute(signal)
+        except ValueError as e:              # FormulaError compris
+            return False, str(e)
+        y = derived.y[np.isfinite(derived.y)]
+        unit = params.get("unit", "")
+        message = f"{derived.y.size} points"
+        if y.size:
+            message += f", de {y.min():.4g} à {y.max():.4g} {unit}".rstrip()
+        if y.size < derived.y.size:
+            message += f" ({derived.y.size - y.size} valeurs non définies : nan / inf)"
+        warnings = derived.metadata.get("warnings")
+        if warnings:
+            message += "\n" + "\n".join(warnings)
+        return True, message
+
+    def _ask_formula(self, signal, defaults=None) -> dict | None:
+        dialog = FormulaDialog(self.formula_channels(signal),
+                               lambda params: self.check_formula(signal, params),
+                               defaults, parent=self.view)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return dialog.params()
 
     def _build_action_request(self, signal,action_type):
         """

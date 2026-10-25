@@ -1145,3 +1145,89 @@ class ChannelMatchingDialog(QDialog):
 
     def mode(self) -> str:
         return "channel" if self.by_channel.isChecked() else "name"
+
+
+class FormulaDialog(QDialog):
+    """
+    Saisie d'une formule (analyse « Formula ») : formule, nom et unité de la courbe, base
+    de temps ; liste des voies à insérer (double-clic) et vérification immédiate.
+    """
+
+    def __init__(self, channels: list, check, defaults: dict = None, parent=None):
+        """
+        Args:
+            channels : textes insérables ([T AMB], [200 W:T AMB], time...)
+            check    : callable(params) -> (formule valide, message)
+            defaults : paramètres initiaux (formula, name, unit, time_base, period)
+        """
+        from PyQt6.QtWidgets import QComboBox, QListWidget, QHBoxLayout
+        super().__init__(parent)
+        self.setWindowTitle("Add a formula")
+        self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
+        self.resize(620, 460)
+        self.check = check
+        defaults = defaults or {}
+
+        self.formula = QLineEdit(defaults.get("formula", ""))
+        self.formula.setPlaceholderText("ex : [Débit]/60*4180*([T sortie]-[T entrée])"
+                                        "   ou   100*sin(2*pi*50*time)")
+        self.name = QLineEdit(defaults.get("name", "Formula"))
+        self.unit = QLineEdit(defaults.get("unit", ""))
+        self.time_base = QComboBox()
+        self.time_base.addItems(["Host file", "Own period"])
+        self.time_base.setCurrentText(defaults.get("time_base", "Host file"))
+        self.period = QDoubleSpinBox()
+        self.period.setDecimals(6)
+        self.period.setRange(1e-6, 1e6)
+        self.period.setSuffix(" s")
+        self.period.setValue(defaults.get("period", 0.001))
+        self.channels = QListWidget()
+        self.channels.addItems(channels)
+        self.channels.itemDoubleClicked.connect(lambda item: self._insert(item.text()))
+        self.message = QLabel()
+        self.message.setWordWrap(True)
+
+        form = QFormLayout()
+        form.addRow("Formule :", self.formula)
+        form.addRow("Nom de la courbe :", self.name)
+        form.addRow("Unité :", self.unit)
+        time_row = QHBoxLayout()
+        time_row.addWidget(self.time_base)
+        time_row.addWidget(self.period)
+        form.addRow("Base de temps :", time_row)
+
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                        QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(QLabel("Voies (double-clic pour insérer) — fonctions : sin, cos, "
+                                "tan, exp, log, log10, sqrt, abs, max, min, sum, avg "
+                                "(arguments séparés par ;)"))
+        layout.addWidget(self.channels, 1)
+        layout.addWidget(self.message)
+        layout.addWidget(self.buttons)
+
+        for widget in (self.formula, self.name, self.unit):
+            widget.textChanged.connect(self._update)
+        self.time_base.currentTextChanged.connect(self._update)
+        self.period.valueChanged.connect(self._update)
+        self._update()
+
+    def _insert(self, text):
+        self.formula.insert(text)
+        self.formula.setFocus()
+
+    def params(self) -> dict:
+        return {"formula": self.formula.text().strip(), "name": self.name.text().strip()
+                or "Formula", "unit": self.unit.text().strip(),
+                "time_base": self.time_base.currentText(), "period": self.period.value()}
+
+    def _update(self, *_):
+        self.period.setEnabled(self.time_base.currentText() == "Own period")
+        ok, message = self.check(self.params())
+        self.message.setText(message)
+        self.message.setStyleSheet("" if ok else "color: #c0392b")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)

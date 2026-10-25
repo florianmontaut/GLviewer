@@ -42,6 +42,10 @@ class BaseContextMenu(QtCore.QObject):
                                         label="Add an Y offset",
                                         enabled_if= lambda s: s.has_selection
                                         ),
+                    qSignalType.FORMULA : ActionSpec(
+                                        label="Add a formula",
+                                        enabled_if= lambda s: s.has_selection
+                                        ),
                     qSignalType.MODEL : ActionSpec(
                                         label="Get thermal model",
                                         enabled_if= lambda s: s.has_selection

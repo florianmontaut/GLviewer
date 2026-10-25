@@ -111,7 +111,8 @@ class ActionRegistry:
                             ModifyNodeFactory(True)
                         )
 
-        for sig_type in (  qSignalType.MODEL, qSignalType.FFT, qSignalType.DIFF_EXT ):
+        for sig_type in (  qSignalType.MODEL, qSignalType.FFT, qSignalType.DIFF_EXT,
+                            qSignalType.FORMULA ):
             self.register(
                             ActionModifier.ADD_ACTION,
                             sig_type,
