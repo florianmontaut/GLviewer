@@ -32,6 +32,7 @@ def essais(ctrl, tmp_path):
 
 
 def _models(ctrl, signals):
+    ctrl._ask_power_source = lambda signals: {}        # puissance par défaut (saisie)
     ctrl.apply_to_signals(signals, T.MODEL)
     ctrl.graph_ctrl.range_picker.accepted.emit(signals[0], 0.0, float(N - 1))
 

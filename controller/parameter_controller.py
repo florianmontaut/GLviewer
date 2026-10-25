@@ -261,18 +261,21 @@ class ParameterController(QObject):
                 key= obj.opts_dict[group_key + (param_name,)]
             value = obj.get_param(key)
             # -----------------------------
-            # Voie du fichier par son nom (ex: source de la puissance d'un modèle) :
-            # valeur "" = saisie manuelle
+            # Voie du fichier (ex: source de la puissance d'un modèle) : nom affiché, id
+            # enregistré ; valeur "" = saisie manuelle
             # -----------------------------
             if ptype == "channel":
                 file_obj = getattr(self._signal, "file", None)
-                names = [s.name for s in getattr(file_obj, "signals", [])
-                         if s is not self._signal]
+                signals = [s for s in getattr(file_obj, "signals", [])
+                           if s is not self._signal]
                 limits = {spec.get("manual_label", "Manual value"): ""}
-                limits.update({name: name for name in names})
-                if value and value not in names:
-                    # voie supprimée ou renommée : reste affichée (le modèle est signalé ⚠)
-                    limits[f"{value} (introuvable)"] = value
+                limits.update({s.name: s.id for s in signals})
+                by_name = {s.name: s.id for s in signals}
+                if value in by_name and value not in limits.values():
+                    value = by_name[value]      # projet d'avant l'id : voie par son nom
+                elif value and value not in limits.values():
+                    # voie supprimée : reste affichée (le modèle est signalé ⚠)
+                    limits["Voie introuvable"] = value
                 param = parameterTypes.ListParameter(name=param_name, limits=limits,
                                                      value=value or "",
                                                      tip=spec.get("description"))

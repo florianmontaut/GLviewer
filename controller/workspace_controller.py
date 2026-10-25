@@ -221,7 +221,8 @@ class WorkspaceController(QtCore.QObject):
 
         Args:
             signals         : voies visées
-            build_request   : callable(sig) -> ActionRequest (None : voie ignorée)
+            build_request   : callable(sig) -> ActionRequest (None : voie ignorée,
+                              str : voie en échec, avec ce message)
             text            : libellé de l'entrée de l'historique
 
         Returns:
@@ -233,7 +234,9 @@ class WorkspaceController(QtCore.QObject):
         try:
             for sig in signals:
                 request = build_request(sig)
-                if request is not None and self.push(sig, request, errors=failures):
+                if isinstance(request, str):
+                    failures.append((sig, request))
+                elif request is not None and self.push(sig, request, errors=failures):
                     applied += 1
         finally:
             self.undo_stack.endMacro()

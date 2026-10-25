@@ -683,7 +683,9 @@ class SignalObject:
 
     def to_dict(self):
 
-        arg_to_export= ['name','visible','pen','pipeline','analyses','is_reference']
+        # id : identité de la voie d'un enregistrement à l'autre (ex: voie de puissance
+        # d'un modèle thermique, retrouvée même si elle est renommée)
+        arg_to_export= ['id','name','visible','pen','pipeline','analyses','is_reference']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['pipeline'] = [(n_id,node.to_dict()) for n_id,node in
                                     obj_params['pipeline'].items()] 
@@ -703,7 +705,9 @@ class SignalObject:
 
     @staticmethod
     def _restore_nodes(sig, data, filter_factory, analysis_factory):
-        """Visibilité, couleur, filtres et analyses sauvegardés d'une voie."""
+        """Identité, visibilité, couleur, filtres et analyses sauvegardés d'une voie."""
+        # projets antérieurs à la sauvegarde de l'id : nouvel id (celui de __init__)
+        sig.id          =   data.get("id") or sig.id
         sig.visible     =   data.get("visible", True)
         sig.pen         =   custom_struct_functions.dict_to_QPen( data.get("pen"))
 

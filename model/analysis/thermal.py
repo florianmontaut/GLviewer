@@ -232,19 +232,27 @@ class ThermalModelAnalysis(AnalysisNode):
     # --------------------------------------------------
 
     def _find_power_signal(self, parent_signal):
-        """Voie de puissance (même fichier que la voie modélisée), None si manuelle."""
-        name = self.get_param('power_channel')
-        if not name:
+        """
+        Voie de puissance (même fichier que la voie modélisée), None si manuelle ou
+        introuvable. power_channel est l'id de la voie (elle peut être renommée) ; les
+        projets enregistrés avant l'id contiennent son nom.
+        """
+        ref = self.get_param('power_channel')
+        if not ref:
             return None
-        return next((s for s in parent_signal.file.signals if s.name == name), None)
+        signals = parent_signal.file.signals
+        return (next((s for s in signals if s.id == ref), None)
+                or next((s for s in signals if s.name == ref), None))
 
     def power_signal(self, parent_signal):
         """Voie de puissance choisie, None si la puissance est manuelle (RuntimeError :
         voie introuvable)."""
-        name = self.get_param('power_channel')
+        ref = self.get_param('power_channel')
         sig = self._find_power_signal(parent_signal)
-        if name and sig is None:
-            raise RuntimeError(f"Voie de puissance « {name} » introuvable dans "
+        if ref and sig is None:
+            name = self.results.power_channel if self.results is not None else ""
+            raise RuntimeError(f"Voie de puissance {f'« {name} » ' if name else ''}"
+                               f"introuvable dans "
                                f"{parent_signal.file.label or parent_signal.file.name}")
         if sig is parent_signal:
             raise RuntimeError("La voie de puissance est la voie modélisée")
@@ -252,13 +260,13 @@ class ThermalModelAnalysis(AnalysisNode):
 
     def input_key(self, parent_signal) -> tuple:
         # le modèle est aussi périmé quand la voie de puissance change (table modifiée,
-        # filtre, voie supprimée ou renommée)
+        # filtre, voie supprimée ; renommée : nom affiché dans les résultats)
         key = parent_signal.input_key()
-        name = self.get_param('power_channel')
-        if not name:
+        ref = self.get_param('power_channel')
+        if not ref:
             return key
         sig = self._find_power_signal(parent_signal)
-        return (key, name, sig.input_key() if sig is not None else None)
+        return (key, ref, None if sig is None else (sig.name, sig.input_key()))
 
     def power_on_fit_range(self, parent_signal) -> tuple[float, float, float]:
         """(moyenne, min, max) de la puissance sur la plage de fit [t_start, t_end]."""
@@ -395,9 +403,11 @@ class ThermalModelAnalysis(AnalysisNode):
                 raise RuntimeError("Model range does not overlap the signal")
             self.set_fit_range(t_start, t_end)
         power, power_min, power_max = self.power_on_fit_range(parent_signal)
+        power_signal = self.power_signal(parent_signal)
         self.results=self.run(x,y,power)
         self.results.power_min, self.results.power_max = power_min, power_max
-        self.results.power_channel = self.get_param('power_channel') or ""
+        # nom de la voie de puissance au moment du calcul (affichage)
+        self.results.power_channel = power_signal.name if power_signal is not None else ""
 
         x_model, y_model = self.generate_model_curve()
 

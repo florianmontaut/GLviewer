@@ -195,6 +195,7 @@ def test_temperature_rise_skips_reference_itself(ctrl, files):
 
 def test_thermal_model_on_channel_with_one_range(ctrl, files):
     ch1 = [f.signals[0] for f in files]
+    ctrl._ask_power_source = lambda signals: {}        # puissance par défaut (saisie)
     ctrl.apply_to_signals(ch1, T.MODEL)
     ctrl.graph_ctrl.range_picker.accepted.emit(ch1[0], 0.0, 599.0)
 

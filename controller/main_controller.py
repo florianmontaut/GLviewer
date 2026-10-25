@@ -33,7 +33,8 @@ from model.channels import (MATCHING_ASK, MATCHING_MODES, MATCHING_SETTINGS, gro
                             same_grouping)
 from controller.commands.channel_link import (ChannelLinkCommand, ChannelMatchingCommand,
                                               ChannelGroupsCommand)
-from ressources.custom_dialogs import ChannelMatchingDialog, FormulaDialog
+from ressources.custom_dialogs import (ChannelMatchingDialog, FormulaDialog,
+                                      PowerSourceDialog)
 from model.computed import ComputedSignal
 from model.formula import FormulaError
 from controller.commands.computed_channel import (AddComputedChannelCommand,
@@ -68,6 +69,8 @@ class MainController(QtCore.QObject):
         self.settings={} #? basculer settings dans model ? (PipelineTreeModel) 16/03
         # vue « Par voie » : voies du modèle thermique en attente de la plage (graphique)
         self._pending_model_signals = None
+        # puissance de ces modèles (voir _ask_power_source)
+        self._pending_power = {}
         self.benchmark_ctrl = None
         # voies calculées : état des données d'entrée lors du dernier tracé
         self._computed_keys = {}
@@ -705,8 +708,12 @@ class MainController(QtCore.QObject):
             return
         T = custom_types.qSignalType
         if action_type == T.MODEL:
-            # plage choisie une fois sur le graphique (première voie), puis appliquée à
-            # toutes (voir _on_model_range_accepted)
+            # puissance puis plage choisies une fois (plage sur le graphique, première
+            # voie), puis appliquées à toutes (voir _on_model_range_accepted)
+            power = self._ask_power_source(signals)
+            if power is None:
+                return
+            self._pending_power = power
             self._pending_model_signals = signals
             self.graph_ctrl.start_range_selection(signals[0])
             self.view.statusBar().showMessage(self.graph_ctrl.range_picker.HINT)
@@ -726,6 +733,53 @@ class MainController(QtCore.QObject):
         else:
             build = lambda sig: self._build_action_request(sig, action_type)
         self._push_group(signals, build, action_type)
+
+    def _power_channels(self, signals) -> list:
+        """
+        Voies logiques pouvant donner la puissance des modèles de signals : présentes
+        dans au moins un de leurs fichiers, et ne contenant aucune des voies modélisées.
+        """
+        files = {sig.file for sig in signals}
+        return [channel for channel in self.channel_model.groups()
+                if any(s.file in files for s in channel.signals)
+                and not any(s in signals for s in channel.signals)]
+
+    def _ask_power_source(self, signals) -> dict | None:
+        """
+        Source de la puissance des modèles créés sur plusieurs voies : {"channel_key":
+        clé de la voie logique}, {"power": valeur} ou {} (valeur par défaut, aucune voie
+        possible). None si annulé.
+        """
+        channels = self._power_channels(signals)
+        if not channels:
+            return {}
+        n_files = len({sig.file for sig in signals})
+        choices = []
+        for channel in channels:
+            n = len({s.file for s in channel.signals} & {sig.file for sig in signals})
+            choices.append((f"{channel.name} ({n}/{n_files} essai(s))", channel.key))
+        # voie en W proposée par défaut (ex: voie calculée steps(time; ...))
+        preferred = next((c.key for c in channels
+                          if any(s.unit.strip() == "W" for s in c.signals)), None)
+        dialog = PowerSourceDialog(choices, preferred=preferred, parent=self.view)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return dialog.choice()
+
+    def _model_power_params(self, sig, power: dict) -> dict | str:
+        """Paramètres de puissance du modèle de sig (str : voie de puissance absente)."""
+        if "power" in power:
+            return {"power": power["power"], "power_channel": ""}
+        if "channel_key" not in power:
+            return {}
+        channel = next((c for c in self.channel_model.groups()
+                        if c.key == power["channel_key"]), None)
+        source = next((s for s in (channel.signals if channel else []) if s.file is sig.file),
+                      None)
+        if source is None:
+            name = channel.name if channel else "?"
+            return f"pas de voie de puissance « {name} » dans ce fichier"
+        return {"power_channel": source.id}
 
     def _push_group(self, signals, build, action_type):
         applied, failures = self.workspace_ctrl.push_group(
@@ -1011,14 +1065,21 @@ class MainController(QtCore.QObject):
         """Plage validée sur le graphique : création du modèle thermique."""
         self.view.statusBar().clearMessage()
         signals, self._pending_model_signals = self._pending_model_signals, None
+        power, self._pending_power = self._pending_power, {}
         if signals:
-            # vue « Par voie » : même plage pour toutes les voies de la sélection
-            self._push_group(signals, lambda sig: ActionRequest(
-                                action_modifier = custom_types.ActionModifier.ADD_ACTION,
-                                action_type     = custom_types.qSignalType.MODEL,
-                                params          = {'model_range': [t_start, t_end]},
-                                index           = None),
-                             custom_types.qSignalType.MODEL)
+            # vue « Par voie » : même plage et même source de puissance pour toutes les
+            # voies de la sélection (voie de puissance de chaque essai)
+            def build(sig):
+                power_params = self._model_power_params(sig, power)
+                if isinstance(power_params, str):
+                    return power_params
+                return ActionRequest(
+                            action_modifier = custom_types.ActionModifier.ADD_ACTION,
+                            action_type     = custom_types.qSignalType.MODEL,
+                            params          = {'model_range': [t_start, t_end],
+                                               **power_params},
+                            index           = None)
+            self._push_group(signals, build, custom_types.qSignalType.MODEL)
             return
         self.workspace_ctrl.push(
                                 signal,
@@ -1033,6 +1094,7 @@ class MainController(QtCore.QObject):
 
     def _on_model_range_cancelled(self, *_):
         self._pending_model_signals = None
+        self._pending_power = {}
         self.view.statusBar().clearMessage()
 
     def _connect_cursor_signals(self):

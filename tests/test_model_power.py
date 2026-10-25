@@ -5,7 +5,7 @@ Puissance du modèle thermique (Rth = ΔT / P) : valeur saisie, ou voie du fichi
 """
 import numpy as np
 import pytest
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtWidgets
 
 from controller.commands.computed_channel import ModifyComputedChannelCommand
 from helpers import add, nodes
@@ -44,8 +44,8 @@ def test_manual_power_by_default(ctrl, files):
 
 def test_power_from_channel_on_fit_range(ctrl, files, power):
     sig = files[0].signals[0]
-    first = _model(ctrl, sig, (0.0, 290.0), power_channel="P")
-    second = _model(ctrl, sig, (310.0, 599.0), power_channel="P")
+    first = _model(ctrl, sig, (0.0, 290.0), power_channel=power.id)
+    second = _model(ctrl, sig, (310.0, 599.0), power_channel=power.id)
 
     assert first.results.power == 200.0 and second.results.power == 800.0
     assert first.results.R_th == pytest.approx(_rth(first.results))
@@ -54,7 +54,7 @@ def test_power_from_channel_on_fit_range(ctrl, files, power):
 
 
 def test_fit_range_over_two_steps_is_flagged(ctrl, files, power):
-    analysis = _model(ctrl, files[0].signals[0], (0.0, 599.0), power_channel="P")
+    analysis = _model(ctrl, files[0].signals[0], (0.0, 599.0), power_channel=power.id)
     res = analysis.results
     assert 200.0 < res.power < 800.0
     assert (res.power_min, res.power_max) == (200.0, 800.0)
@@ -63,7 +63,7 @@ def test_fit_range_over_two_steps_is_flagged(ctrl, files, power):
 
 def test_model_follows_power_table_changes(ctrl, files, power):
     sig = files[0].signals[0]
-    analysis = _model(ctrl, sig, power_channel="P")
+    analysis = _model(ctrl, sig, power_channel=power.id)
     stack = ctrl.workspace_ctrl.undo_stack
 
     stack.push(ModifyComputedChannelCommand(ctrl, power,
@@ -77,7 +77,7 @@ def test_model_follows_power_table_changes(ctrl, files, power):
 
 def test_removed_power_channel_flags_the_model(ctrl, files, power):
     sig = files[0].signals[0]
-    analysis = _model(ctrl, sig, power_channel="P")
+    analysis = _model(ctrl, sig, power_channel=power.id)
     item = ctrl.model.find_item(ctrl.model.root, power)
     ctrl.view.treefile.setCurrentIndex(ctrl.model.index_from_item(item))
 
@@ -116,29 +116,167 @@ def test_power_source_in_parameter_tree(ctrl, files, power, qapp):
     limits = source.opts["limits"]
     assert limits["Manual value"] == ""
     assert {"CH2", "P"} <= set(limits) and "CH1" not in limits    # pas la voie modélisée
+    assert limits["P"] == power.id                             # nom affiché, id enregistré
 
-    source.setValue("P")
+    source.setValue(power.id)
     qapp.processEvents()
 
     analysis = nodes(sig.analyses)[0]
-    assert analysis.get_param("power_channel") == "P"
+    assert analysis.get_param("power_channel") == power.id
     assert analysis.results.power == 200.0
+    assert analysis.results.power_channel == "P"
 
 
 def test_power_channel_saved_with_project(ctrl, files, power, tmp_path):
-    _model(ctrl, files[0].signals[0], power_channel="P")
+    _model(ctrl, files[0].signals[0], power_channel=power.id)
     project = tmp_path / "power.json"
     ctrl.workspace.save(project)
 
     ctrl.import_ctrl.openProject(str(project))
 
     analysis = nodes(ctrl.workspace.files[0].signals[0].analyses)[0]
-    assert analysis.get_param("power_channel") == "P"
+    reloaded = next(s for s in ctrl.workspace.files[0].signals if s.name == "P")
+    assert reloaded.id == power.id                       # id des voies sauvegardé
+    assert analysis.get_param("power_channel") == power.id
+    assert analysis.error is None and analysis.results.power == 200.0
+
+
+def test_renamed_power_channel_still_used(ctrl, files, power):
+    sig = files[0].signals[0]
+    analysis = _model(ctrl, sig, power_channel=power.id)
+
+    ctrl.workspace_ctrl.undo_stack.push(ModifyComputedChannelCommand(ctrl, power,
+                                                                     {"name": "P conv"}))
+
+    assert analysis.error is None and analysis.results.power == 200.0
+    assert analysis.results.power_channel == "P conv"                # nom à jour
+    assert "« P conv »" in power_text(analysis.results)
+
+
+def test_power_channel_by_name_from_older_projects(ctrl, files, power):
+    """Projets enregistrés avant l'id : power_channel contient le nom de la voie."""
+    analysis = _model(ctrl, files[0].signals[0], power_channel="P")
     assert analysis.error is None and analysis.results.power == 200.0
 
 
 def test_tree_tooltip_shows_power(ctrl, files, power):
-    analysis = _model(ctrl, files[0].signals[0], power_channel="P")
+    analysis = _model(ctrl, files[0].signals[0], power_channel=power.id)
     index = ctrl.model.index_from_item(ctrl.model.find_item_by_object_id(analysis.id))
     tip = ctrl.model.data(index, QtCore.Qt.ItemDataRole.ToolTipRole)
     assert "« P »" in tip and "200 W" in tip
+
+
+# ---------------- choix groupé (vue « Par voie ») ----------------
+
+def _power_channels(ctrl, dialog, files, levels=(200, 400)):
+    """Voie « P » (W) dans chaque essai : level W jusqu'à 300 s."""
+    out = []
+    for file_obj, level in zip(files, levels):
+        out.append(channel(ctrl, dialog, file_obj, f"steps(time; 0; {level}; 300; 800)",
+                           name="P", unit="W"))
+    ctrl.channel_model.rebuild()
+    return out
+
+
+def _answer_power_dialog(monkeypatch, answer):
+    """Réponse de la boîte PowerSourceDialog : dict de choice(), ou None (annulée)."""
+    from ressources import custom_dialogs
+    seen = {}
+    default_choice = custom_dialogs.PowerSourceDialog.choice
+
+    def fake_exec(self):
+        seen["choices"] = [(self.channels.itemText(i), self.channels.itemData(i))
+                           for i in range(self.channels.count())]
+        seen["default"] = default_choice(self)
+        if answer is None:
+            return QtWidgets.QDialog.DialogCode.Rejected
+        return QtWidgets.QDialog.DialogCode.Accepted
+    monkeypatch.setattr(custom_dialogs.PowerSourceDialog, "exec", fake_exec)
+    if answer is not None:
+        monkeypatch.setattr(custom_dialogs.PowerSourceDialog, "choice",
+                            lambda self: answer(seen) if callable(answer) else answer)
+    return seen
+
+
+def _group_models(ctrl, signals, model_range=(0.0, 290.0)):
+    ctrl.apply_to_signals(signals, T.MODEL)
+    if ctrl._pending_model_signals is not None:
+        ctrl.graph_ctrl.range_picker.accepted.emit(signals[0], *model_range)
+
+
+def test_group_models_use_each_file_power_channel(ctrl, files, dialog, monkeypatch):
+    p_a, p_b = _power_channels(ctrl, dialog, files)
+    seen = _answer_power_dialog(monkeypatch, lambda seen: seen["default"])
+    ch1 = [f.signals[0] for f in files]
+
+    _group_models(ctrl, ch1)
+
+    # voie « P » proposée (unité W) et choisie par défaut, CH1 (modélisée) exclue
+    labels = [label for label, _ in seen["choices"]]
+    assert "P (2/2 essai(s))" in labels and not any(l.startswith("CH1") for l in labels)
+    assert "channel_key" in seen["default"]
+    (model_a,), (model_b,) = nodes(ch1[0].analyses), nodes(ch1[1].analyses)
+    assert model_a.get_param("power_channel") == p_a.id
+    assert model_b.get_param("power_channel") == p_b.id
+    assert (model_a.results.power, model_b.results.power) == (200.0, 400.0)
+    # une seule entrée d'historique
+    ctrl.workspace_ctrl.undo_stack.undo()
+    assert not ch1[0].analyses and not ch1[1].analyses
+
+
+def test_group_models_with_manual_power(ctrl, files, dialog, monkeypatch):
+    _power_channels(ctrl, dialog, files)
+    _answer_power_dialog(monkeypatch, {"power": 250.0})
+    ch1 = [f.signals[0] for f in files]
+
+    _group_models(ctrl, ch1)
+
+    for sig in ch1:
+        (model,) = nodes(sig.analyses)
+        assert model.get_param("power_channel") == ""
+        assert model.results.power == 250.0
+
+
+def test_group_models_missing_power_channel_reported(ctrl, files, dialog, monkeypatch,
+                                                    warnings_shown):
+    (p_a,) = _power_channels(ctrl, dialog, files[:1])         # « P » dans fileA seulement
+    seen = _answer_power_dialog(monkeypatch, lambda seen: seen["default"])
+    ch1 = [f.signals[0] for f in files]
+
+    _group_models(ctrl, ch1)
+
+    assert "P (1/2 essai(s))" in [label for label, _ in seen["choices"]]
+    assert nodes(ch1[0].analyses)[0].get_param("power_channel") == p_a.id
+    assert not ch1[1].analyses
+    assert "pas de voie de puissance « P »" in str(warnings_shown[0])
+
+
+def test_group_models_cancelled_power_dialog(ctrl, files, dialog, monkeypatch):
+    _power_channels(ctrl, dialog, files)
+    _answer_power_dialog(monkeypatch, None)
+    ch1 = [f.signals[0] for f in files]
+
+    ctrl.apply_to_signals(ch1, T.MODEL)
+
+    assert ctrl._pending_model_signals is None
+    assert not ctrl.graph_ctrl.range_picker.is_active
+
+
+def test_group_models_without_candidate_channel(ctrl, files, dialogs_opened):
+    """Aucune autre voie : pas de question, puissance saisie par défaut."""
+    signals = [s for f in files for s in f.signals]           # toutes les voies
+
+    _group_models(ctrl, signals, (0.0, 599.0))
+
+    assert "PowerSourceDialog" not in dialogs_opened
+    assert all(nodes(sig.analyses)[0].results.power == 100.0 for sig in signals)
+
+
+def test_power_source_dialog_defaults(qapp):
+    from ressources.custom_dialogs import PowerSourceDialog
+    dialog = PowerSourceDialog([("P (2/2)", "name:p"), ("CH2 (2/2)", "name:ch2")])
+    assert dialog.manual_mode.isChecked() and not dialog.channels.isEnabled()
+    assert dialog.choice() == {"power": 100.0}
+    dialog = PowerSourceDialog([("P (2/2)", "name:p"), ("CH2 (2/2)", "name:ch2")],
+                               preferred="name:ch2")
+    assert dialog.choice() == {"channel_key": "name:ch2"}

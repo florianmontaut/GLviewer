@@ -1409,3 +1409,69 @@ class LutDialog(QDialog):
             self._show(True, self.call())
         except ValueError as e:
             self._show(False, str(e))
+
+
+class PowerSourceDialog(QDialog):
+    """
+    Puissance des modèles thermiques créés d'un coup sur plusieurs voies (vue « Par
+    voie ») : valeur saisie, ou voie logique (ex: « P ») dont chaque essai utilise sa
+    propre voie (puissance moyenne sur la plage du modèle).
+    """
+
+    def __init__(self, choices: list, power: float = 100.0, preferred=None, parent=None):
+        """
+        Args:
+            choices   : [(libellé, clé de la voie logique)]
+            power     : valeur saisie par défaut (W)
+            preferred : clé de la voie proposée par défaut (None : valeur saisie)
+        """
+        from PyQt6.QtWidgets import QComboBox
+        super().__init__(parent)
+        self.setWindowTitle("Thermal model power")
+        self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
+        self.setMinimumWidth(460)
+
+        self.channel_mode = QRadioButton("Voie de puissance de chaque essai :")
+        self.channels = QComboBox()
+        for label, key in choices:
+            self.channels.addItem(label, key)
+        self.manual_mode = QRadioButton("Valeur saisie, identique pour toutes les voies :")
+        self.power = QDoubleSpinBox()
+        self.power.setRange(-1e9, 1e9)
+        self.power.setDecimals(3)
+        self.power.setSuffix(" W")
+        self.power.setValue(power)
+        if preferred is not None and self.channels.findData(preferred) >= 0:
+            self.channels.setCurrentIndex(self.channels.findData(preferred))
+            self.channel_mode.setChecked(True)
+        else:
+            self.manual_mode.setChecked(True)
+        self.channel_mode.toggled.connect(self._update)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                   QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        info = QLabel("Rth = ΔT / P : avec une voie de puissance (ex : voie calculée "
+                      "steps(time; ...)), P est sa moyenne sur la plage du modèle, dans "
+                      "chaque essai.")
+        info.setWordWrap(True)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(info)
+        layout.addWidget(self.channel_mode)
+        layout.addWidget(self.channels)
+        layout.addWidget(self.manual_mode)
+        layout.addWidget(self.power)
+        layout.addWidget(buttons)
+        self._update()
+
+    def _update(self, *_):
+        self.channels.setEnabled(self.channel_mode.isChecked())
+        self.power.setEnabled(not self.channel_mode.isChecked())
+
+    def choice(self) -> dict:
+        """{"channel_key": clé de la voie logique} ou {"power": valeur saisie}."""
+        if self.channel_mode.isChecked():
+            return {"channel_key": self.channels.currentData()}
+        return {"power": self.power.value()}
