@@ -7,3 +7,6 @@ ressources/__pycache__/
 view/__pycache__/
 tests/__pycache__/
 .pytest_cache/
+
+# caches Python de tous les dossiers (nouveaux modules compris)
+__pycache__/
