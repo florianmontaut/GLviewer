@@ -228,6 +228,12 @@ class ThermalFitResult:
     T_inf: float
     T0: float
     rmse: float
+    # puissance utilisée pour Rth (W) et sa plage sur l'intervalle de fit (voie de
+    # puissance : moyenne, min et max ; valeur manuelle : identiques)
+    power: float = 0.0
+    power_min: float = 0.0
+    power_max: float = 0.0
+    power_channel: str = ""
 
     def to_dict(self):
 

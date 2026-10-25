@@ -6,6 +6,7 @@ import pathlib
 from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel
 from PyQt6.QtGui import QColor,QBrush,QFont,QIcon
 from model.tree_item import TreeItem
+from model.benchmark import power_text
 from model.base_objects import FileObject, SignalObject,Workspace
 from model.filters.base_filter import FilterNode
 from model.analysis.base_analysis import AnalysisNode
@@ -236,6 +237,10 @@ class PipelineTreeModel(QAbstractItemModel):
                 return f"{obj.display_name} ⚠"
             if role == Qt.ItemDataRole.ToolTipRole:
                 return f"Analyse non recalculée : {obj.error}"
+        # modèle thermique : puissance utilisée pour Rth (voie ou valeur saisie)
+        if (obj_type == itemType.ANALYSE and role == Qt.ItemDataRole.ToolTipRole
+                and hasattr(getattr(obj, "results", None), "power")):
+            return power_text(obj.results)
 
         # voie calculée : ƒ, formule en infobulle, échec du calcul signalé
         if obj_type == itemType.RAW and getattr(obj, "is_computed", False):

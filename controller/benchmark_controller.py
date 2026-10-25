@@ -6,7 +6,8 @@ import pyqtgraph as pg
 import pyqtgraph.exporters
 from PyQt6 import QtCore, QtWidgets, sip
 
-from model.benchmark import (QUANTITIES, benchmark_rows, channels_with_model, value)
+from model.benchmark import (QUANTITIES, benchmark_rows, channels_with_model, power_text,
+                             value)
 from view.benchmark_window import BenchmarkWindow
 
 ALL_MODELS = "Voies avec un modèle thermique"
@@ -85,7 +86,9 @@ class BenchmarkController(QtCore.QObject):
         else:
             self.window.info.setText("Point de fonctionnement : premier nombre de l'étiquette "
                                      "du fichier (ex: « 100 W »). Rth = ΔT / puissance du "
-                                     "modèle thermique (paramètre du modèle, 100 W par défaut).")
+                                     "modèle thermique : moyenne de sa voie de puissance sur "
+                                     "la plage du modèle (« Power source »), sinon valeur "
+                                     "saisie (100 W par défaut).")
 
     def _fill_table(self):
         table, quantity = self.window.table, self.quantity
@@ -109,8 +112,7 @@ class BenchmarkController(QtCore.QObject):
                 else:
                     res = model.results
                     item.setToolTip(f"T∞ = {res.T_inf:.2f} °C, T0 = {res.T0:.2f} °C, "
-                                    f"τ = {res.tau:.1f} s\nPuissance du modèle : "
-                                    f"{model.get_param('power'):g} W")
+                                    f"τ = {res.tau:.1f} s\n{power_text(res)}")
                 table.setItem(r, c, item)
         table.resizeColumnsToContents()
 

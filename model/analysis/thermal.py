@@ -75,12 +75,22 @@ class ThermalModelAnalysis(AnalysisNode):
                                 },
                         "key": "model_range",
                         },
+        # puissance de Rth = ΔT / P : voie du fichier (ex: voie calculée
+        # steps(time; 0; 200; 201; 800)), moyennée sur la plage de fit, ou valeur manuelle
+        "Power source": {
+                        "type": "channel",
+                        "default": "",
+                        "manual_label": "Manual value",
+                        "key": "power_channel",
+                        "description": "Voie donnant la puissance introduite (moyenne sur "+
+                                        "la plage du modèle), ou valeur manuelle ci-dessous"
+                        },
         "User estimated power input (W)": {
                         "type": "float",
                         "default": 100.0,
                         "suffix": "W",
                         "key": "power",
-                        "description": "Puissance introduite (W)"
+                        "description": "Puissance introduite (W), si la source est manuelle"
                         },
         "User estimated heat capacity": {
                         "type": "float",
@@ -148,6 +158,9 @@ class ThermalModelAnalysis(AnalysisNode):
 
         if self.t_start is None or self.t_end is None:
             raise RuntimeError("Fit range not defined")
+        if not np.isfinite(power) or power == 0:
+            raise InvalidModelFit(f"Puissance nulle ou indéfinie ({power:g} W) : "
+                                  "Rth = ΔT / P ne peut pas être calculée")
 
         # --- Troncature ---
         # données manquantes (NaN) exclues du fit
@@ -203,13 +216,62 @@ class ThermalModelAnalysis(AnalysisNode):
                                         C_th=C_th,
                                         T_inf=T_inf,
                                         T0=T0,
-                                        rmse=rmse
+                                        rmse=rmse,
+                                        power=float(power),
+                                        power_min=float(power),
+                                        power_max=float(power),
                                     )
 
         self._x_fitted = x_fit
         self._y_fitted = y_pred
 
         return self.results
+
+    # --------------------------------------------------
+    # Puissance (Rth = ΔT / P)
+    # --------------------------------------------------
+
+    def _find_power_signal(self, parent_signal):
+        """Voie de puissance (même fichier que la voie modélisée), None si manuelle."""
+        name = self.get_param('power_channel')
+        if not name:
+            return None
+        return next((s for s in parent_signal.file.signals if s.name == name), None)
+
+    def power_signal(self, parent_signal):
+        """Voie de puissance choisie, None si la puissance est manuelle (RuntimeError :
+        voie introuvable)."""
+        name = self.get_param('power_channel')
+        sig = self._find_power_signal(parent_signal)
+        if name and sig is None:
+            raise RuntimeError(f"Voie de puissance « {name} » introuvable dans "
+                               f"{parent_signal.file.label or parent_signal.file.name}")
+        if sig is parent_signal:
+            raise RuntimeError("La voie de puissance est la voie modélisée")
+        return sig
+
+    def input_key(self, parent_signal) -> tuple:
+        # le modèle est aussi périmé quand la voie de puissance change (table modifiée,
+        # filtre, voie supprimée ou renommée)
+        key = parent_signal.input_key()
+        name = self.get_param('power_channel')
+        if not name:
+            return key
+        sig = self._find_power_signal(parent_signal)
+        return (key, name, sig.input_key() if sig is not None else None)
+
+    def power_on_fit_range(self, parent_signal) -> tuple[float, float, float]:
+        """(moyenne, min, max) de la puissance sur la plage de fit [t_start, t_end]."""
+        sig = self.power_signal(parent_signal)
+        if sig is None:
+            power = float(self.get_param('power'))
+            return power, power, power
+        x, y = np.asarray(sig.x, dtype=float), np.asarray(sig.y, dtype=float)
+        values = y[(x >= self.t_start) & (x <= self.t_end) & np.isfinite(y)]
+        if values.size == 0:
+            raise RuntimeError(f"La voie de puissance « {sig.name} » n'a pas de valeur sur "
+                               f"la plage du modèle ({self.t_start:g} - {self.t_end:g} s)")
+        return float(values.mean()), float(values.min()), float(values.max())
 
     # --------------------------------------------------
     # Génération de la courbe modèle (projection)
@@ -299,6 +361,7 @@ class ThermalModelAnalysis(AnalysisNode):
                                 "T0"        :    float(self.results.T0),
                                 "T_inf"     :    float(self.results.T_inf),
                                 "rmse"      :    float(self.results.rmse),
+                                "power"     :    float(self.results.power),
                                 "fit_range" :    (float(self.t_start), float(self.t_end))
                                 }
         return data
@@ -331,7 +394,10 @@ class ThermalModelAnalysis(AnalysisNode):
             if t_end <= t_start:
                 raise RuntimeError("Model range does not overlap the signal")
             self.set_fit_range(t_start, t_end)
-        self.results=self.run(x,y,self.get_param('power'))
+        power, power_min, power_max = self.power_on_fit_range(parent_signal)
+        self.results=self.run(x,y,power)
+        self.results.power_min, self.results.power_max = power_min, power_max
+        self.results.power_channel = self.get_param('power_channel') or ""
 
         x_model, y_model = self.generate_model_curve()
 

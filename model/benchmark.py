@@ -4,8 +4,8 @@ Fenêtre « Benchmark » : résultats des modèles thermiques d'une même voie d
 essais (ex: T_dissipateur à 100, 200 et 300 W), en fonction du point de fonctionnement.
 
 Point de fonctionnement : premier nombre de l'étiquette du fichier (« 100 W / 55 °C »
--> 100 W). Rth = ΔT / puissance du modèle thermique (paramètre du modèle, 100 W par
-défaut, en attendant les pertes réelles de l'équipement).
+-> 100 W). Rth = ΔT / puissance du modèle thermique : moyenne de sa voie de puissance
+sur la plage du modèle (ex: voie calculée steps(time; ...)), sinon valeur saisie.
 """
 import re
 from dataclasses import dataclass, field
@@ -75,6 +75,24 @@ def benchmark_rows(workspace, channels) -> list[BenchmarkRow]:
     rows.sort(key=lambda row: (row.x is None, row.x if row.x is not None else 0,
                                order[row.file]))
     return rows
+
+
+# variation relative de la puissance sur la plage du modèle au-delà de laquelle elle est
+# signalée (plage à cheval sur deux paliers ?)
+POWER_SPREAD_WARNING = 0.05
+
+
+def power_text(results) -> str:
+    """Puissance utilisée pour Rth, telle qu'affichée (infobulles)."""
+    if not results.power_channel:
+        return f"Puissance du modèle : {results.power:g} W (valeur saisie)"
+    text = (f"Puissance du modèle : {results.power:.4g} W (moyenne de "
+            f"« {results.power_channel} » sur la plage du modèle)")
+    spread = results.power_max - results.power_min
+    if abs(results.power) > 0 and spread > POWER_SPREAD_WARNING * abs(results.power):
+        text += (f"\n⚠ la puissance varie de {results.power_min:.4g} à "
+                 f"{results.power_max:.4g} W sur la plage : plusieurs paliers ?")
+    return text
 
 
 def value(row: BenchmarkRow, channel, quantity: Quantity) -> float | None:
