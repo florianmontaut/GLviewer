@@ -1,8 +1,10 @@
 # tests/test_import.py
 import json
 import os
+import sys
 
 import numpy as np
+import pytest
 
 from helpers import load
 
@@ -17,6 +19,8 @@ def test_csv_import_with_overrange_check(ctrl, csv_files):
     np.testing.assert_allclose(files[0].signals[0].x[:3], [0, 1, 2])
 
 
+@pytest.mark.skipif(sys.platform != "win32",
+                    reason="'\\' n'est un séparateur de chemin que sous Windows")
 def test_csv_import_windows_path(ctrl, csv_files):
     """Un chemin avec des '\\' (glisser-déposer, fichiers récents...) doit fonctionner."""
     win_path = csv_files[0].replace("/", "\\")

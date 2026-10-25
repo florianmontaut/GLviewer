@@ -1,11 +1,14 @@
 # tests/test_project_io.py
 """Sauvegarde d'un projet (.json) puis rechargement : filtres ET analyses."""
 import json
+import os
 
 import numpy as np
 import pytest
+from PyQt6 import QtWidgets
 
-from ressources.custom_types import qSignalType as T, ActionModifier as M
+from ressources.custom_types import qSignalType as T, ActionModifier as M, ImportMode, fileType
+from ressources.custom_exceptions import JSONStructureError
 from helpers import add, make_request, load, nodes
 
 
@@ -120,3 +123,52 @@ def test_reload_project_saved_before_ids(ctrl, csv_files, tmp_path):
     assert all(key == node.id for key, node in sig.pipeline.items())
     assert len(sig.analyses) == 0
     np.testing.assert_allclose(sig.y, sig.raw_y + 2.0)
+
+
+# ---------------- fichier de données introuvable ----------------
+
+def _project_with_moved_file(ctrl, csv_files, tmp_path):
+    load(ctrl, csv_files[0])
+    project = tmp_path / "project.json"
+    ctrl.workspace.save(project)
+    os.rename(csv_files[0], csv_files[0] + ".moved")
+    return project
+
+
+def test_missing_data_file_keeps_later_imports_working(ctrl, csv_files, tmp_path):
+    """Un projet en échec ne laisse pas l'import en mode « restauration »."""
+    project = _project_with_moved_file(ctrl, csv_files, tmp_path)
+    files_before = list(ctrl.workspace.files)
+
+    with pytest.raises(JSONStructureError, match="introuvable"):
+        ctrl.import_ctrl.openProject(str(project))
+
+    assert ctrl.import_ctrl._from_project == ImportMode.INTERACTIVE
+    assert ctrl.workspace.files == files_before          # workspace courant inchangé
+    load(ctrl, csv_files[1])
+    assert [f.name for f in ctrl.workspace.files] == ["fileA", "fileB"]
+
+
+def test_missing_data_file_reported_from_menu(ctrl, csv_files, tmp_path, monkeypatch,
+                                              warnings_shown):
+    """Files > Load > Project : message d'erreur, pas d'import wizard sur le .json."""
+    project = _project_with_moved_file(ctrl, csv_files, tmp_path)
+    monkeypatch.setattr(QtWidgets.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(project), ""))
+    wizard = []
+    monkeypatch.setattr(ctrl.import_ctrl, "ImportWizard", lambda *a, **k: wizard.append(a))
+
+    ctrl.import_ctrl.load_file_dialog(fileType.JSON)
+
+    assert not wizard
+    assert len(warnings_shown) == 1 and "introuvable" in warnings_shown[0][2]
+
+
+def test_missing_data_file_reported_from_recent_files(ctrl, csv_files, tmp_path,
+                                                      warnings_shown):
+    project = _project_with_moved_file(ctrl, csv_files, tmp_path)
+
+    ctrl.import_ctrl.loaderSelect({"file_type": "JSON", "address": str(project),
+                                   "import_params": {}})
+
+    assert len(warnings_shown) == 1 and "introuvable" in warnings_shown[0][2]

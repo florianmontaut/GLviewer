@@ -3,7 +3,6 @@
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QHeaderView
-from pkg_resources import normalize_path
 from pyqtgraph.parametertree import Parameter, ParameterTree,parameterTypes
 from model.base_objects import SignalObject,FileObject
 from model.filters.base_filter import FilterNode

@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import csv,json,re,datetime
+import csv,json,os,re,datetime
 from collections import namedtuple
 
 from PyQt6 import QtGui,QtCore,QtWidgets
@@ -578,12 +578,28 @@ class ImportController(QtCore.QObject):
 
     def openProject(self,fname,settings=None):
 
+        # les loaders renvoient le FileStruct au lieu de l'envoyer au workspace ; le mode
+        # interactif est rétabli même si le chargement échoue (sinon les imports suivants
+        # ne seraient plus jamais ajoutés au workspace)
         self._from_project=custom_types.ImportMode.RESTORE
+        try:
+            ws = self._restore_project(fname)
+        finally:
+            self._from_project=custom_types.ImportMode.INTERACTIVE
+        self.project_signal.emit(ws)
+
+    def _restore_project(self,fname) -> Workspace:
+
         with open(fname, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         ws = Workspace()
         for file_data in data["workspace"]["files"]:
+            if not os.path.exists(file_data['address']):
+                raise custom_exceptions.JSONStructureError(
+                        f"Fichier de données introuvable : {file_data['address']}\n"
+                        "Il a été déplacé, renommé ou supprimé depuis l'enregistrement "
+                        "du projet.")
             file_type=custom_types.fileType[file_data['file_type']]
             while True:
                 try:
@@ -630,9 +646,7 @@ class ImportController(QtCore.QObject):
         # appariement des voies de la vue « Par voie »
         ws.channels_from_dict(data["workspace"].get("channels"))
         ws.path = fname
-
-        self._from_project=custom_types.ImportMode.INTERACTIVE
-        self.project_signal.emit(ws)
+        return ws
 
 
     def loaderSelect(self,loadStruct:dict):
@@ -677,6 +691,8 @@ class ImportController(QtCore.QObject):
                                 "Structure de donnée invalide",
                                 str(e)+'\n Veuillez vérifier la structure du fichier GL.')
             self.ImportWizard(fname,params)
+        except custom_exceptions.JSONImportError as e:
+            self._project_error(e)
         except Exception as err:
             errorStruct=[err,fileType,fname,params]
             self.ImportErrorUserWarning(errorStruct)
@@ -711,5 +727,12 @@ class ImportController(QtCore.QObject):
             self.view.statusbar.showMessage(f"Loading file: {fname}",3000)
             import_request.loader(fname=fname)
         except Exception as e :
+            if fileType == custom_types.fileType.JSON:
+                # l'import wizard (fichiers texte) ne sait pas ouvrir un projet
+                self._project_error(e)
+                return
             print(e)
             self.ImportWizard(fname)
+
+    def _project_error(self, error: Exception):
+        QtWidgets.QMessageBox.warning(self.view, "Ouverture du projet impossible", str(error))
