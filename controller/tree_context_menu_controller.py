@@ -25,6 +25,7 @@ class TreeContextMenu(BaseContextMenu):
         x_offset = self._add_action(qSignalType.OFFSET_X)
         model_   = self._add_action(qSignalType.MODEL)
         formula_ = self._add_action(qSignalType.FORMULA)
+        align_   = self._add_action(qSignalType.ALIGN)
         delete_  = self._add_action(qSignalType.DEL)
         start_rec = self._add_action(qSignalType.START)
         stop_rec  = self._add_action(qSignalType.STOP)
@@ -38,6 +39,7 @@ class TreeContextMenu(BaseContextMenu):
                                 x_offset,
                                 model_,
                                 formula_,
+                                align_,
                                 delete_
                             ])
         self.menu.insertSeparator(filter_)
