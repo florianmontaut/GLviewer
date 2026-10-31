@@ -25,7 +25,7 @@ puissance par paliers, interp([V]; 0; -40; 5; 150) une courbe d'étalonnage.
 """
 import numpy as np
 
-from model.base_objects import SignalObject
+from model.base_objects import SignalObject, MAX_GRAPHS
 from model.channels import channel_key
 from model.formula import FormulaError, evaluate, parse, references
 from ressources import custom_struct_functions
@@ -78,6 +78,13 @@ class ComputedSignal(SignalObject):
                             'limits': (1e-9, None),
                             'suffix': 's',
                             "key": "period",
+                        },
+        'Graph':        {
+                            'type': 'int',
+                            'default': 1,
+                            'limits': [1, MAX_GRAPHS],
+                            "key": "graph_number",
+                            "tip": "Graphique où la courbe est tracée (1 : graphique du haut)",
                         },
         'Curve pen':    {
                             'type': 'pen',

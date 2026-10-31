@@ -412,7 +412,19 @@ class MouseCursors(pTypes.GroupParameter):
             self.mouseUpdate(self.lastPos)"""
 
 
-    def mouseUpdate(self,x,y):
+    def set_graph(self, graph):
+        """Curseur déplacé dans un autre tracé (graphiques empilés : panneau survolé)."""
+        if graph is self.graph:
+            return
+        shown = [item for item in self.cursors + [self.valtext]
+                 if item.scene() is not None and item.getViewBox() is not None]
+        for item in shown:
+            self.graph.removeItem(item)
+        self.graph = graph
+        for item in shown:
+            self.graph.addItem(item, ignoreBounds=item is not self.valtext)
+
+    def mouseUpdate(self,x,y,y_view=None):
         """_summary_
 
         Args:
@@ -425,11 +437,13 @@ class MouseCursors(pTypes.GroupParameter):
             #! revoir cette partie
             if y is None:
                 y=0
-            pos=QtCore.QPointF(x,y)
+            # y_view : position dans le tracé, si y est sur une autre échelle (unité)
+            y_pos = y if y_view is None else y_view
+            pos=QtCore.QPointF(x,y_pos)
             self.valtext.setPos(pos)
 
             self.cursors[0].setPos(x)
-            self.cursors[1].setPos(y)
+            self.cursors[1].setPos(y_pos)
             text=[f'X={x:0.1f}',f'Y={y:0.1f}',
                     f'X={x:0.1f}\nY={y:0.1f}']
             if self.textIndex>=0:

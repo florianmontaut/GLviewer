@@ -29,6 +29,8 @@ class ParameterController(QObject):
         super().__init__()
         self.widget = param_widget
         self.graph = graph_widget
+        # tracé du panneau d'un signal (graphiques empilés), remplacé par le MainController
+        self.plot_of = lambda signal: self.graph
         self.param = None
         # connexion du ParameterTree affiché (déconnectée à chaque reconstruction afin
         # que l'ancien arbre ne puisse plus émettre avec un SelectionContext périmé)
@@ -263,8 +265,10 @@ class ParameterController(QObject):
                 # plage sur le graphique (RangePicker)
                 if self._data_range is not None:
                     cursors_setting["bounds"] = self._data_range
+                # curseurs dans le panneau du signal
+                graph = self.plot_of(self._signal) if self._signal is not None else self.graph
                 param = LinkedCursors(  name = param_name,
-                                        graphWidget = self.graph,
+                                        graphWidget = graph,
                                         cursors_setting = cursors_setting,
                                         expanded = spec.get("expanded", False),
                                         show = self._cursors_shown.get(param_name,

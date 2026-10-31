@@ -89,6 +89,7 @@ class MainController(QtCore.QObject):
         self.graph_ctrl     = GraphController(view.maingraph,view.graphTree)
         plotItem=[item for item in view.maingraph.items() if isinstance(item,pg.PlotItem)][0]
         self.param_ctrl     = ParameterController(view.selectiontree,plotItem)
+        self.param_ctrl.plot_of = self.graph_ctrl.plot_of
 
         self.cursor_ctrl    = CursorController()
         # vue « Par voie » : même workspace, une voie regroupée sur tous les fichiers
@@ -1160,6 +1161,18 @@ class MainController(QtCore.QObject):
         sig=ctx.signal
         # paramètres d'un fichier, d'une voie... : enregistrés avec le projet
         QtCore.QTimer.singleShot(0, self._update_title)
+        if (ctx.role in (itemType.CHANNEL_GROUP, itemType.FILE)
+                and "graph_number" in new_params):
+            # « Graph » d'un fichier ou d'un groupe : appliqué à toutes ses voies. La valeur
+            # affichée est leur numéro commun (0 s'ils diffèrent) : l'arbre ne signale que
+            # les valeurs modifiées
+            number = new_params.pop("graph_number")
+            if number != sig.graph_number:
+                if number > 0:
+                    self.set_graph_number(sig.signals, number)
+                # 0 choisi : rien à appliquer, valeur réelle remise dans l'arbre
+                QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
+                return
         if ctx.role == itemType.CHANNEL_GROUP:
             # groupe de la vue « Par voie » : renommage annulable
             self.edit_channel_groups("rename", (sig.id, new_params.get("name", "")))
@@ -1439,6 +1452,16 @@ class MainController(QtCore.QObject):
             self.model.refresh_object(sig)
         self.channel_model.rebuild()
         self._refresh_derived()
+
+    def set_graph_number(self, signals, number: int):
+        """Voies tracées dans le graphique n° number (la dernière affectation l'emporte)."""
+        self.graph_ctrl.freeze_updates(True)
+        try:
+            for sig in signals:
+                sig.graph_number = number
+                self.graph_ctrl.update_signal(sig)
+        finally:
+            self.graph_ctrl.freeze_updates(False)
 
     def _modify_computed_channel(self, ctx, new_params):
         sig = ctx.signal

@@ -240,6 +240,19 @@ class PlotPanel:
             units.insert(0, preferred)
         return units
 
+    def to_main_y(self, sig, y: float) -> float:
+        """Ordonnée y de sig (son unité) dans les coordonnées de l'échelle principale."""
+        scale = self.scales.get(self.unit_of(sig)) if self.unit_of(sig) != self.main_unit                 else None
+        if scale is None or scale.a == 0:
+            return y
+        return (y - scale.b) / scale.a
+
+    def dispose(self):
+        """Panneau retiré du graphique : échelles secondaires détachées."""
+        for scale in self.scales.values():
+            scale.remove()
+        self.scales = {}
+
     def view_of(self, sig) -> pg.ViewBox:
         """ViewBox où la courbe de sig est tracée (celle de son unité)."""
         unit = self.unit_of(sig)

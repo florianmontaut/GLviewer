@@ -17,12 +17,14 @@ class TextAnnotation:
         anchor_pos  : point annoté relié au texte par une flèche (x, y), ou None
         color       : couleur par défaut du texte et couleur de la flèche (#AARRGGBB)
         font        : police par défaut du texte (QFont.toString())
+        graph       : graphique empilé où le texte est placé (1 : celui du haut)
     """
     html:       str
     pos:        tuple[float, float]
     anchor_pos: tuple[float, float] | None = None
     color:      str = "#ff000000"
     font:       str = ""
+    graph:      int = 1
     id:         str = field(default_factory=lambda: uuid.uuid4().hex)
 
     def with_changes(self, **changes) -> "TextAnnotation":
@@ -36,6 +38,7 @@ class TextAnnotation:
                 "anchor_pos"    : None if self.anchor_pos is None else list(self.anchor_pos),
                 "color"         : self.color,
                 "font"          : self.font,
+                "graph"         : self.graph,
                 }
 
     @staticmethod
@@ -47,5 +50,6 @@ class TextAnnotation:
                                 anchor_pos  = None if anchor is None else tuple(anchor),
                                 color       = data.get("color", "#ff000000"),
                                 font        = data.get("font", ""),
+                                graph       = int(data.get("graph", 1)),
                                 id          = data.get("id") or uuid.uuid4().hex,
                             )

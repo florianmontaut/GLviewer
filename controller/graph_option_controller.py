@@ -211,7 +211,17 @@ class GraphTreeController(QtCore.QObject):
                                 )
 
 
-    def addText(self, pos, anchor_pos=None, text=None, color=None, edit=True):
+    def plot_for_graph(self, number):
+        """Tracé du graphique n° number (remplacé par le GraphController)."""
+        return self.graphPlot
+
+    def annotations(self) -> list:
+        return list(self._annotations.values())
+
+    def annotations_removed(self):
+        """Textes retirés (remplacé par le GraphController : panneaux vides retirés)."""
+
+    def addText(self, pos, anchor_pos=None, text=None, color=None, edit=True, graph=1):
         """
         Crée un texte sur le graphique. Il n'est ajouté au modèle (annotation_created,
         une étape d'undo) qu'à la fermeture de l'éditeur ; un texte laissé vide est retiré.
@@ -224,6 +234,7 @@ class GraphTreeController(QtCore.QObject):
                                                       par le curseur souris, s'il y en a)
             color       (QColor|None)               : couleur du texte et de la flèche
             edit        (bool)                      : ouvre l'éditeur de texte
+            graph       (int)                       : graphique empilé (1 : celui du haut)
         Returns:
             pgText: le texte créé
         """
@@ -239,7 +250,8 @@ class GraphTreeController(QtCore.QObject):
                                 pos         = tuple(pos),
                                 anchor_pos  = None if anchor_pos is None else tuple(anchor_pos),
                                 color       = QtGui.QColor(color).name(
-                                                    QtGui.QColor.NameFormat.HexArgb))
+                                                    QtGui.QColor.NameFormat.HexArgb),
+                                graph       = graph)
         text_item = self._create_item(draft)
         text_item.apply_annotation(draft)
         text_item.setText(text)
@@ -263,9 +275,10 @@ class GraphTreeController(QtCore.QObject):
         self.annotation_created.emit(annotation)
 
     def _create_item(self, annotation):
-        text_item = custom_dialogs.pgText(  plotItem=self.graphPlot,
+        plot = self.plot_for_graph(annotation.graph)
+        text_item = custom_dialogs.pgText(  plotItem=plot,
                                             color=QtGui.QColor(annotation.color))
-        self.graphPlot.addItem(text_item, ignoreBounds=True)
+        plot.addItem(text_item, ignoreBounds=True)
         text_item.sigUserChanged.connect(self._on_user_changed)
         text_item.sigDeleteRequested.connect(self._on_delete_requested)
         text_item.sigRemoved.connect(self._on_text_removed)
@@ -295,6 +308,7 @@ class GraphTreeController(QtCore.QObject):
         text_item = self.textItems.pop(annotation_id, None)
         if text_item is not None:
             text_item.delete()
+        self.annotations_removed()
 
     def clear_annotations(self):
         for annotation_id in list(self.textItems):

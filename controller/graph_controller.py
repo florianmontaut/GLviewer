@@ -36,6 +36,8 @@ class RangePicker(QtCore.QObject):
         self.region = None
         self.signal = None
         self._shortcuts = []
+        # tracé de la zone selon le signal (remplacé par le GraphController)
+        self.plot_of = lambda signal: plot
         self.plot.scene().sigMouseClicked.connect(self._on_mouse_clicked)
 
     @property
@@ -47,6 +49,8 @@ class RangePicker(QtCore.QObject):
         if self.is_active:
             self.cancel()
         self.signal = signal
+        # panneau du signal (graphiques empilés)
+        self.plot = self.plot_of(signal)
         color = signal.pen.color() if signal.pen is not None else QtGui.QColor('r')
         brush = QtGui.QColor(color)
         brush.setAlpha(40)
@@ -118,9 +122,11 @@ class GraphController(QtCore.QObject):
     - update style
     - update pipeline (sig.y recalcule automatiquement)
 
-    Le graphique est fait de panneaux (controller.plot_panel.PlotPanel : un tracé, ses
-    axes et ses courbes). Un seul panneau pour l'instant : plot, vb et curves sont ceux
-    du panneau principal.
+    Le graphique est fait de panneaux empilés (controller.plot_panel.PlotPanel : un
+    tracé, ses axes et ses courbes), à l'axe des temps commun. Chaque voie est tracée dans
+    le panneau de son paramètre « Graph » (graph_number, 1 : celui du haut) ; il y a autant
+    de panneaux que le plus grand numéro utilisé par une courbe ou un texte. plot, vb et
+    time_axis sont ceux du panneau principal (le premier).
     """
 
     curve_selected          = QtCore.pyqtSignal(custom_items.SelectionContext)
@@ -177,6 +183,8 @@ class GraphController(QtCore.QObject):
         self._init_cursor()
         # sélection de la plage des données d'entrée d'un modèle
         self.range_picker = RangePicker(self.plot, self.graph)
+        # zone tracée dans le panneau du signal
+        self.range_picker.plot_of = self.plot_of
         # position (scene) du dernier clic droit dans le graphique : position des actions
         # du menu contextuel (ex: ajout de texte)
         self._context_scene_pos = None
@@ -226,12 +234,86 @@ class GraphController(QtCore.QObject):
         self.legend = pg.LegendItem((80,60), offset = (70,20),colCount = 2,verSpacing = -5)
 
     def add_panel(self) -> PlotPanel:
-        """Nouveau panneau de graphique, sous les précédents."""
+        """Nouveau panneau de graphique, sous les précédents, à l'axe des temps commun."""
         panel = PlotPanel(self._display_y, self.opts)
         self.graph.addItem(panel.plot, row=len(self.panels), col=0)
+        if self.panels:
+            panel.vb.setXLink(self.main_panel.vb)
+            if getattr(self, "menu", None) is not None:
+                self._share_menu(panel)
         self.panels.append(panel)
+        self._layout_panels()
         self._apply_theme()
         return panel
+
+    def _share_menu(self, panel):
+        """
+        Actions du menu contextuel (filtre, modèle, texte...) aussi dans ce panneau : ce
+        sont les mêmes QAction (états activé / désactivé communs), placées avant
+        « View All » comme dans le menu du panneau principal.
+        """
+        main_menu = self.main_panel.vb.menu
+        actions = main_menu.actions()
+        shared = actions[:actions.index(main_menu.viewAll)]
+        panel.vb.menu.insertActions(panel.vb.menu.viewAll, shared)
+
+    def _remove_panel(self, panel):
+        if self.graph_tree_ctrl.mouseCursor.graph is panel.plot:
+            self.graph_tree_ctrl.mouseCursor.set_graph(self.plot)
+        if self.range_picker.is_active and self.range_picker.plot is panel.plot:
+            self.range_picker.cancel()
+        self.panels.remove(panel)
+        panel.dispose()
+        self.graph.removeItem(panel.plot)
+        self._layout_panels()
+
+    def _layout_panels(self):
+        """Titre de l'axe des temps sous le dernier panneau seulement."""
+        for panel in self.panels:
+            panel.xp_axis.showLabel(panel is self.panels[-1])
+
+    # ---------------- numéro de graphique (paramètre « Graph ») ----------------
+
+    @staticmethod
+    def graph_number(obj) -> int:
+        """Numéro du panneau d'une voie ou d'un texte (1 : panneau du haut)."""
+        try:
+            return max(1, int(getattr(obj, "graph_number", getattr(obj, "graph", 1)) or 1))
+        except (TypeError, ValueError):
+            return 1
+
+    def panel_number(self, number: int) -> PlotPanel:
+        """Panneau n° number (1 : celui du haut), créé avec ceux qui manquent."""
+        while len(self.panels) < number:
+            self.add_panel()
+        return self.panels[number - 1]
+
+    def plot_of(self, sig) -> pg.PlotItem:
+        """Tracé du panneau d'un signal (celui de son paramètre « Graph »)."""
+        panel = self.panel_of(sig)
+        if panel is None:
+            number = self.graph_number(sig)
+            panel = self.panels[number - 1] if number <= len(self.panels) else self.main_panel
+        return panel.plot
+
+    def number_of_panel(self, panel) -> int:
+        return self.panels.index(panel) + 1 if panel in self.panels else 1
+
+    def trim_panels(self):
+        """Panneaux du bas retirés quand plus aucune courbe ni aucun texte n'y est."""
+        needed = max([1] + [self.graph_number(sig) for sig in self.curves]
+                     + [self.graph_number(a) for a in self.graph_tree_ctrl.annotations()])
+        while len(self.panels) > needed:
+            self._remove_panel(self.panels[-1])
+
+    def _move_curve(self, sig, panel):
+        """Courbe de sig déplacée dans un autre panneau (paramètre « Graph » modifié)."""
+        current = self.panel_of(sig)
+        if current is panel or current is None:
+            return
+        current.remove_curve(sig)
+        panel.add_curve(sig, self._on_curve_clicked)
+        self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
 
     # ---------------- panneau principal (compatibilité : un seul panneau) ----------------
 
@@ -261,7 +343,7 @@ class GraphController(QtCore.QObject):
 
     @property
     def curves(self) -> dict:
-        """Courbes de tous les panneaux : signal -> courbe."""
+        """Courbes de tous les panneaux : signal -> courbe (ordre des panneaux)."""
         if len(self.panels) == 1:
             return self.main_panel.curves
         return {sig: curve for panel in self.panels for sig, curve in panel.curves.items()}
@@ -313,9 +395,10 @@ class GraphController(QtCore.QObject):
 
     # ----------------------------------------------------
     def add_signal_curve(self, sig: SignalObject|DerivedSignalObject, panel=None):
-        """Courbe de sig, dans panel (par défaut le panneau principal)."""
+        """Courbe de sig, dans panel (par défaut celui de son paramètre « Graph »)."""
         if self.panel_of(sig) is None:
-            (panel or self.main_panel).add_curve(sig, self._on_curve_clicked)
+            panel = panel or self.panel_number(self.graph_number(sig))
+            panel.add_curve(sig, self._on_curve_clicked)
 
     def _signal_from_curve(self, curve):
         for panel in self.panels:
@@ -361,6 +444,13 @@ class GraphController(QtCore.QObject):
         panel = self.panel_of(sig)
         if panel is None:
             return
+        # paramètre « Graph » modifié : la courbe (et ses signaux dérivés) change de panneau
+        target = self.panel_number(self.graph_number(sig))
+        if target is not panel:
+            for moved in [sig] + list(getattr(sig, "derived_signals", [])):
+                self._move_curve(moved, target)
+            panel = target
+            self.trim_panels()
         panel.redraw(sig)
         # la courbe sélectionnée reste mise en évidence
         self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
@@ -422,10 +512,14 @@ class GraphController(QtCore.QObject):
         panel = self.panel_of(signal)
         if panel is not None:
             panel.remove_curve(signal)
+            self.trim_panels()
 
     def _init_cursor(self):
 
         self.graph_tree_ctrl = GraphTreeController(self.plot,self.graph_tree,**self.opts)
+        # textes : panneau de leur numéro de graphique (créé si besoin : projet relu)
+        self.graph_tree_ctrl.plot_for_graph = lambda number: self.panel_number(number).plot
+        self.graph_tree_ctrl.annotations_removed = self.trim_panels
         self.proxy = pg.SignalProxy(self.plot.scene().sigMouseMoved,rateLimit = 50,
                                     slot = self._on_mouse_moved)
         self.graph_tree_ctrl.mouseCursor.param('snap to selected signal').sigValueChanged.connect(
@@ -470,6 +564,7 @@ class GraphController(QtCore.QObject):
             mousePoint = panel.vb.mapSceneToView(pos)
             # Y conservé pour le curseur libre (non accroché à une courbe)
             self._mouse_pos = mousePoint
+            self._mouse_panel = panel
             self.cursor_moved_X.emit(float(mousePoint.x()))
 
     #MAJ de la position du curseur grâce à la position de la souris
@@ -477,10 +572,20 @@ class GraphController(QtCore.QObject):
 
         if x is None:
             return
+        cursor = self.graph_tree_ctrl.mouseCursor
         if y is None:
-            # curseur libre : il suit la souris
+            # curseur libre : il suit la souris, dans le panneau survolé
             y = float(self._mouse_pos.y())
-        self.graph_tree_ctrl.mouseCursor.mouseUpdate(x,y)
+            panel = getattr(self, "_mouse_panel", None) or self.main_panel
+            cursor.set_graph(panel.plot)
+            cursor.mouseUpdate(x, y)
+            return
+        # curseur accroché à la courbe sélectionnée : son panneau et son échelle
+        sig = self.old_highlight
+        panel = self.panel_of(sig) if sig is not None else None
+        panel = panel or self.main_panel
+        cursor.set_graph(panel.plot)
+        cursor.mouseUpdate(x, y, y_view=panel.to_main_y(sig, y) if sig is not None else None)
 
     def _init_graph_menu(self):
         """
@@ -531,27 +636,33 @@ class GraphController(QtCore.QObject):
             scene_pos = self._context_scene_pos
         if scene_pos is None:
             scene_pos = self.main_panel.vb.sceneBoundingRect().center()
-        # textes : tracés dans le panneau principal (outils graphiques)
-        vb = self.main_panel.vb
+        # texte placé dans le panneau du clic
+        panel = self.panel_at(scene_pos) or self.main_panel
+        vb = panel.vb
+        graph = self.number_of_panel(panel)
 
         sig = self.old_highlight
         sample = None
-        if sig is not None and sig in self.curves and self.curves[sig].isVisible():
+        # échantillon annoté : courbe sélectionnée du même panneau
+        if (sig is not None and sig in panel.curves and panel.curves[sig].isVisible()):
             sample = self.nearest_sample(sig, scene_pos)
 
         if sample is None:
             click = vb.mapSceneToView(scene_pos)
-            return self.graph_tree_ctrl.addText(pos=(click.x(), click.y()))
+            return self.graph_tree_ctrl.addText(pos=(click.x(), click.y()), graph=graph)
 
         x, y = sample
-        text_scene = vb.mapViewToScene(QtCore.QPointF(x, y)) + self.ANNOTATION_OFFSET
+        # flèche et texte placés dans les coordonnées de l'échelle principale du panneau
+        y_view = panel.to_main_y(sig, y)
+        text_scene = vb.mapViewToScene(QtCore.QPointF(x, y_view)) + self.ANNOTATION_OFFSET
         text_pos = vb.mapSceneToView(text_scene)
         unit = getattr(sig, 'unit', '') or ''
         text = f"{sig.name}\n{y:.2f} {unit} @ {x:.0f} {self.opts['X_unit']}"
         return self.graph_tree_ctrl.addText(pos         = (text_pos.x(), text_pos.y()),
-                                            anchor_pos  = (x, y),
+                                            anchor_pos  = (x, y_view),
                                             text        = text,
-                                            color       = sig.pen.color())
+                                            color       = sig.pen.color(),
+                                            graph       = graph)
 
     def on_selection_changed(self,sig:SignalObject=None):
 

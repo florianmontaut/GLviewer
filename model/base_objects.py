@@ -23,6 +23,30 @@ import uuid
 
 
 
+# nombre maximal de graphiques empilés (paramètre « Graph » des voies)
+MAX_GRAPHS = 8
+
+# paramètre « Graph » d'un fichier ou d'un groupe de voies : appliqué à toutes ses voies
+GROUP_GRAPH_PARAM = {
+                        'type':'int',
+                        'default':1,
+                        'limits':[0, MAX_GRAPHS],
+                        "readonly": False,
+                        "key": "graph_number",
+                        "tip": "Graphique de toutes les voies (la dernière affectation, "
+                               "voie, fichier ou groupe, l'emporte) ; 0 : voies dans des "
+                               "graphiques différents"
+                    }
+
+
+def common_graph_number(signals) -> int:
+    """Numéro de graphique commun à des voies, 0 s'ils diffèrent (1 sans voie)."""
+    numbers = {getattr(sig, "graph_number", 1) for sig in signals}
+    if not numbers:
+        return 1
+    return numbers.pop() if len(numbers) == 1 else 0
+
+
 class FileObject:
     """
     Représente un fichier chargé (CSV, CAN, UDP...), contenant :
@@ -47,6 +71,7 @@ class FileObject:
                                             "readonly": False,
                                             "key": "label"
                                         },
+                        'Graph'        : GROUP_GRAPH_PARAM,
                         'File editor' :{
                                             'type': 'group',
                                             'expanded':True,
@@ -190,6 +215,11 @@ class FileObject:
     def get_param(self,key):
         """Récupère la valeur d'un paramètre à partir de sa clé."""
         return getattr(self, key)
+
+    @property
+    def graph_number(self) -> int:
+        """Graphique commun des voies du fichier (0 : différents, voir GROUP_GRAPH_PARAM)."""
+        return common_graph_number(self.signals)
 
     def param_default(self, key):
         """Valeur de réinitialisation propre au fichier (None : défaut du schéma)."""
@@ -406,6 +436,15 @@ class SignalObject:
                                             "readonly": False,
                                             "key": "unit"
                                         },
+                        'Graph'         :{
+                                            'type':'int',
+                                            'default':1,
+                                            'limits':[1, MAX_GRAPHS],
+                                            "readonly": False,
+                                            "key": "graph_number",
+                                            "tip": "Graphique où la courbe est tracée "
+                                                   "(1 : graphique du haut)"
+                                        },
                         'Curve Filters' :{
                                             'type': 'group',
                                             'expanded':True,
@@ -439,6 +478,8 @@ class SignalObject:
         self.is_selected = False
         self.is_reference = False
         self.unit ='°C'
+        # graphique empilé où la courbe est tracée (1 : celui du haut)
+        self.graph_number = 1
         self.pen = pen
         self.opts_dict = custom_struct_functions.generate_opts_dict(self.PARAMETER_SCHEMA)
         self.cut_off_freq=0.005
@@ -746,8 +787,8 @@ class SignalObject:
 
         # id : identité de la voie d'un enregistrement à l'autre (ex: voie de puissance
         # d'un modèle thermique, retrouvée même si elle est renommée)
-        arg_to_export= ['id','name','unit','visible','pen','pipeline','analyses',
-                        'is_reference']
+        arg_to_export= ['id','name','unit','graph_number','visible','pen','pipeline',
+                        'analyses','is_reference']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['pipeline'] = [(n_id,node.to_dict()) for n_id,node in
                                     obj_params['pipeline'].items()] 
@@ -773,6 +814,7 @@ class SignalObject:
         # projets antérieurs à la sauvegarde de l'id : nouvel id (celui de __init__)
         sig.id          =   data.get("id") or sig.id
         sig.visible     =   data.get("visible", True)
+        sig.graph_number=   int(data.get("graph_number", 1))
         sig.pen         =   custom_struct_functions.dict_to_QPen( data.get("pen"))
 
         #! Ordered dict n'est pas sérialisable ! => liste de [id, node_dict]
@@ -868,6 +910,11 @@ class DerivedSignalObject(SignalObject):
     def unit(self):
         """Unité du signal parent (modèle, différence...)."""
         return getattr(self.parent_signal, "unit", "")
+
+    @property
+    def graph_number(self):
+        """Tracé dans le graphique du signal parent."""
+        return getattr(self.parent_signal, "graph_number", 1)
 
     @property
     def x(self):

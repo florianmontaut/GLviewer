@@ -15,6 +15,7 @@ import uuid
 from dataclasses import dataclass, field
 
 from ressources.custom_types import itemType
+from model.base_objects import GROUP_GRAPH_PARAM, common_graph_number
 
 MATCH_BY_NAME = "name"
 MATCH_BY_CHANNEL = "channel"
@@ -97,8 +98,9 @@ class UserGroup:
                     "default": "",
                     "key": "name",
                 },
+        "Graph": GROUP_GRAPH_PARAM,
     }
-    opts_dict = {"Name": "name"}
+    opts_dict = {"Name": "name", "Graph": "graph_number"}
 
     @property
     def display_name(self) -> str:
@@ -108,7 +110,12 @@ class UserGroup:
         return getattr(self, key)
 
     def get_params(self) -> dict:
-        return {"name": self.name}
+        return {"name": self.name, "graph_number": self.graph_number}
+
+    @property
+    def graph_number(self) -> int:
+        """Graphique commun des voies du groupe (0 : différents, voir GROUP_GRAPH_PARAM)."""
+        return common_graph_number(self.signals)
 
     @property
     def signals(self) -> list:
