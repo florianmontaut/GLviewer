@@ -4,16 +4,19 @@ Thème de l'interface (clair / sombre), en un seul endroit :
     - couleurs de l'application (passées à qdarktheme) et feuille de style complémentaire ;
     - couleurs du graphique pyqtgraph (fond, axes, textes) ;
     - icônes au trait (ressources/icons/*.svg, tracées en « currentColor ») teintées à la
-      couleur du thème, ou à celle d'une voie dans les arbres.
+      couleur du thème, ou à celle d'une voie dans les arbres ;
+    - barre de titre des fenêtres (Windows), voir style_title_bar.
 L'option « Dark mode » choisit le thème sombre ; sinon, le thème suit celui de Windows.
 """
+import ctypes
 import pathlib
 import re
+import sys
 
 import darkdetect
 import pyqtgraph as pg
 import qdarktheme
-from PyQt6 import QtCore, QtGui, QtSvg
+from PyQt6 import QtCore, QtGui, QtSvg, QtWidgets
 
 ICONS = pathlib.Path(__file__).parent / "icons"
 
@@ -159,6 +162,89 @@ def apply(app, dark_mode: bool = False, extra_qss: str = "") -> None:
     pg.setConfigOption("background", c["graph_bg"])
     pg.setConfigOption("foreground", c["graph_text"])
     _retint_actions()
+    _style_title_bars(app)
+
+
+# ---------------------------------------------------------------- barre de titre
+# La barre de titre est dessinée par Windows (DWM), pas par la feuille de style. Plutôt
+# qu'une fenêtre sans cadre (FramelessWindowHint : déplacement, redimensionnement, ancrage
+# et ombre à refaire), on demande à DWM :
+#   - le mode sombre de la barre (Windows 10 2004+ ; attribut 19 avant) ;
+#   - sa couleur et celle du titre, à celles du thème (Windows 11 ; refusé sans effet
+#     sur Windows 10, où la barre est alors grise foncée ou claire).
+DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19
+DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+DWMWA_BORDER_COLOR = 34
+DWMWA_CAPTION_COLOR = 35
+DWMWA_TEXT_COLOR = 36
+WM_NCACTIVATE = 0x0086
+# fenêtres ayant une barre de titre (pas les menus, info-bulles...)
+_TITLED = (QtCore.Qt.WindowType.Window, QtCore.Qt.WindowType.Dialog)
+
+
+def _colorref(color: str) -> int:
+    """Couleur Windows (COLORREF : 0x00BBGGRR)."""
+    c = QtGui.QColor(color)
+    return c.red() | (c.green() << 8) | (c.blue() << 16)
+
+
+def _native_windows() -> bool:
+    return sys.platform == "win32" and QtGui.QGuiApplication.platformName() == "windows"
+
+
+def _set_dwm_attribute(hwnd: int, attribute: int, value: int) -> bool:
+    data = ctypes.c_int(value)
+    result = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    ctypes.c_void_p(hwnd), ctypes.c_uint(attribute),
+                    ctypes.byref(data), ctypes.sizeof(data))
+    return result == 0
+
+
+def style_title_bar(widget: QtWidgets.QWidget, dark: bool | None = None) -> None:
+    """Barre de titre de la fenêtre widget aux couleurs du thème (Windows seulement)."""
+    if not _native_windows() or not widget.isWindow() or widget.windowType() not in _TITLED:
+        return
+    dark = _current(dark)
+    c = colors(dark)
+    hwnd = int(widget.winId())
+    if not _set_dwm_attribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, int(dark)):
+        _set_dwm_attribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, int(dark))
+    _set_dwm_attribute(hwnd, DWMWA_CAPTION_COLOR, _colorref(c["window"]))
+    _set_dwm_attribute(hwnd, DWMWA_TEXT_COLOR, _colorref(c["text"]))
+    _set_dwm_attribute(hwnd, DWMWA_BORDER_COLOR, _colorref(c["border"]))
+    # fenêtre déjà affichée : Windows ne redessine la barre qu'au prochain changement de
+    # fenêtre active ; on le simule (WM_NCACTIVATE inverse, puis état réel)
+    if widget.isVisible():
+        active = widget.isActiveWindow()
+        for state in (not active, active):
+            ctypes.windll.user32.SendMessageW(ctypes.c_void_p(hwnd), WM_NCACTIVATE,
+                                              int(state), 0)
+
+
+class _TitleBarFilter(QtCore.QObject):
+    """Barre de titre de chaque fenêtre affichée (fenêtre principale, Benchmark, dialogues)."""
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Type.Show and isinstance(obj, QtWidgets.QWidget)                 and obj.isWindow():
+            style_title_bar(obj)
+        return False
+
+
+_title_bar_filter = None
+
+
+def _style_title_bars(app) -> None:
+    global _title_bar_filter
+    if not _native_windows():
+        return
+    if _title_bar_filter is None:
+        _title_bar_filter = _TitleBarFilter()
+        app.installEventFilter(_title_bar_filter)
+    # différé : au changement de palette, Qt rétablit lui-même la barre de titre
+    # d'après le thème de Windows ; nos réglages doivent passer après
+    QtCore.QTimer.singleShot(0, lambda: [style_title_bar(widget)
+                                         for widget in app.topLevelWidgets()
+                                         if widget.isVisible()])
 
 
 # ---------------------------------------------------------------- graphique
