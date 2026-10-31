@@ -7,7 +7,7 @@ import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
 from model.base_objects import SignalObject,DerivedSignalObject
 from model.missing_data import display_values
-from ressources import custom_graph_functions,custom_types,custom_items,custom_menu
+from ressources import custom_graph_functions,custom_types,custom_items,custom_menu,theme
 
 from controller.graph_context_menu_controller import GraphContextMenu
 from controller.graph_option_controller import GraphTreeController
@@ -301,7 +301,7 @@ class GraphController(QtCore.QObject):
         self.yp_axis.setLabel(text=self.opts["Y_title"], units = self.opts["Y_unit"])
         yticks = [self.opts["Y_major_t"],self.opts["Y_minor_t"]]
         self.yp_axis.setTickSpacing(yticks[0], yticks[1])
-        self.graph.setBackground(self.opts["background_color"])
+        self._apply_theme()
         self.plot.showGrid(x = self.opts["X_grid"], y = self.opts["Y_grid"],alpha = 0.4)
         # options complètes (opts peut n'en contenir qu'une partie)
         self.graph_tree_ctrl.update_settings(self.opts)
@@ -333,12 +333,18 @@ class GraphController(QtCore.QObject):
 
         self.yp_axis.enableAutoSIPrefix(False)
         self.plot.setMouseEnabled(x = True, y = True)
-        self.graph.setBackground(self.opts["background_color"])
+        self._apply_theme()
         self.plot.showGrid(x = self.opts["X_grid"], y = self.opts["Y_grid"],alpha = 0.4)
         self.legend = pg.LegendItem((80,60), offset = (70,20),colCount = 2,verSpacing = -5)
         self.vb = self.plot.vb
         self.plot.plot()
         self.vb.autoRange()
+
+    def _apply_theme(self):
+        """Fond (option « Graph Background color » ou celui du thème), axes et textes."""
+        dark = theme.is_dark(self.opts.get("dark_mode", False))
+        self.graph.setBackground(theme.graph_background(self.opts["background_color"], dark))
+        theme.style_plot(self.plot, dark)
 
     def start_range_selection(self, sig: SignalObject):
         """

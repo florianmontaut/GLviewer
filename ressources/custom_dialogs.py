@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QFontDialog,QDialog,QColorDialog,QTabWidget,QGraphi
                             QRadioButton)
 from PyQt6.uic import loadUi
 from PyQt6 import QtGui,QtCore
-from ressources import custom_struct_functions
+from ressources import custom_struct_functions, theme
 
 import pyqtgraph.parametertree as ptree
 import pyqtgraph as pg
@@ -645,8 +645,8 @@ class ImportWizardDialog(QDialog):
     de choisir et visualiser l'import de fichier .csv/.txt
     """
     params_ready = QtCore.pyqtSignal(dict)
-    HIGHLIGHT_BRUSH = QtGui.QBrush(QtGui.QColor(220, 235, 255))  # bleu clair
-    DEFAULT_BRUSH = QtGui.QBrush(QtCore.Qt.GlobalColor.white)
+    # cellules non sélectionnées : fond du thème ; sélectionnées : theme « highlight »
+    DEFAULT_BRUSH = QtGui.QBrush()
     # nombre maximal de lignes lues et de voies tracées pour l'aperçu graphique
     PREVIEW_ROWS = 5000
     PREVIEW_CHANNELS = 40
@@ -916,7 +916,7 @@ class ImportWizardDialog(QDialog):
                 if item is None:
                     continue
                 if row_selected and col_selected:
-                    item.setBackground(self.HIGHLIGHT_BRUSH)
+                    item.setBackground(QtGui.QBrush(theme.color("highlight")))
                 else:
                     item.setBackground(self.DEFAULT_BRUSH)
         self.update_preview()

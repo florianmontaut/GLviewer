@@ -30,6 +30,18 @@ def qapp():
     yield app
 
 
+@pytest.fixture(autouse=True)
+def _restore_theme():
+    """Thème courant et couleurs pyqtgraph remis en l'état après chaque test."""
+    import pyqtgraph as pg
+    from ressources import theme
+    saved = theme._dark, pg.getConfigOption("background"), pg.getConfigOption("foreground")
+    yield
+    theme._dark = saved[0]
+    pg.setConfigOption("background", saved[1])
+    pg.setConfigOption("foreground", saved[2])
+
+
 @pytest.fixture
 def qt_errors(monkeypatch):
     """

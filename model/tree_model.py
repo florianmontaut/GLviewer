@@ -1,10 +1,9 @@
 
 # model/tree_model.py
 import numpy as np
-import pathlib
 
 from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel
-from PyQt6.QtGui import QColor,QBrush,QFont,QIcon
+from PyQt6.QtGui import QBrush,QFont
 from model.tree_item import TreeItem
 from model.benchmark import power_text
 from model.base_objects import FileObject, SignalObject,Workspace
@@ -14,8 +13,8 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from model.base_objects import SignalObject
 from ressources.custom_items import itemType,ModelChangeEvent,ActionModifier
+from ressources import theme
 
-PATH=pathlib.Path(__file__).parent.parent
 
 
 class PipelineTreeModel(QAbstractItemModel):
@@ -27,11 +26,6 @@ class PipelineTreeModel(QAbstractItemModel):
 
         self.workspace = workspace
 
-        self.icon_file              = QIcon(str(PATH)+"/ressources/icons/file.svg")
-        self.icon_signal_raw        = QIcon(str(PATH)+"/ressources/icons/signal_raw.svg")
-        self.icon_signal_modified   = QIcon(str(PATH)+"/ressources/icons/signal_modified.svg")
-        self.icon_filter            = QIcon(str(PATH)+"/ressources/icons/filter.svg")
-        self.icon_signal_reference  = QIcon(str(PATH)+"/ressources/icons/signal_reference.svg")
         #! Comment le code peut-il fonctionner sans erreur, TreeItem attend data, role et parent:
         self.root = TreeItem("Workspace")
 
@@ -288,10 +282,9 @@ class PipelineTreeModel(QAbstractItemModel):
                 return font
 
         if role == Qt.ItemDataRole.ForegroundRole:
+            # signal de référence en rouge ; les autres, couleur de texte du thème
             if isinstance(obj, SignalObject) and obj.is_reference:
-                return QBrush(QColor("#D32F2F"))  # rouge profond
-            else:
-                return QBrush(QColor("#000000"))  # noir profond
+                return QBrush(theme.color("danger"))
 
     # ---------------- Checkbox ----------------
         if (role == Qt.ItemDataRole.CheckStateRole and (obj_type == itemType.DERIVED or
@@ -307,32 +300,31 @@ class PipelineTreeModel(QAbstractItemModel):
     # ---------------- Background color ----------------
         if role == Qt.ItemDataRole.BackgroundRole:
             if obj_type == itemType.RAW:
-                # Couleur de fond = couleur du signal
-                color = QColor(obj.pen.color())
-                # léger alpha pour rester lisible
-                color.setAlpha(150)
-                return QBrush(color)
+                # fond très atténué de la couleur du signal (l'icône porte la couleur pleine)
+                return theme.row_tint(obj.pen.color())
 
         # Icône uniquement sur la colonne 0
         if role == Qt.ItemDataRole.DecorationRole and col == 0:
 
             # FileObject
             if obj_type == itemType.FILE:
-                return self.icon_file
+                return theme.icon("file")
 
             # SignalObject
             if obj_type == itemType.RAW:
 
+                # forme selon le type de signal, tracée à la couleur de sa courbe
                 if obj.is_reference:
-                    return self.icon_signal_reference
+                    name = "signal_reference"
                 elif obj.is_modified:
-                    return self.icon_signal_modified
+                    name = "signal_modified"
                 else:
-                    return self.icon_signal_raw
+                    name = "signal_raw"
+                return theme.icon(name, obj.pen.color())
 
             # FilterNode
             if obj_type == itemType.FILTER:
-                return self.icon_filter
+                return theme.icon("filter")
 
         return None
 

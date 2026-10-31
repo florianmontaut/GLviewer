@@ -8,11 +8,12 @@ au premier niveau.
 Même Workspace que l'arbre « Par fichier » : seule la présentation change.
 """
 from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel, QMimeData, pyqtSignal
-from PyQt6.QtGui import QColor, QBrush, QFont
+from PyQt6.QtGui import QFont
 
 from model.tree_item import TreeItem
 from model.channels import build_channel_tree
 from ressources.custom_types import itemType
+from ressources import theme
 
 # lignes « voie logique » et « groupe » (les autres lignes sont des voies de fichiers)
 CONTAINERS = (itemType.CHANNEL, itemType.CHANNEL_GROUP)
@@ -158,9 +159,9 @@ class ChannelTreeModel(QAbstractItemModel):
         if role == Qt.ItemDataRole.CheckStateRole and col == 0:
             return Qt.CheckState.Checked if sig.visible else Qt.CheckState.Unchecked
         if role == Qt.ItemDataRole.BackgroundRole and col == 0 and sig.pen is not None:
-            color = QColor(sig.pen.color())
-            color.setAlpha(150)
-            return QBrush(color)
+            return theme.row_tint(sig.pen.color())
+        if role == Qt.ItemDataRole.DecorationRole and col == 0 and sig.pen is not None:
+            return theme.icon("signal_raw", sig.pen.color())
         manual = sig in self._group_of(sig).manual
         if role == Qt.ItemDataRole.FontRole and (sig.is_selected or manual):
             font = QFont()

@@ -247,6 +247,7 @@ class MainController(QtCore.QObject):
 
         self.view.addAction(self.undo_action)
         self.view.addAction(self.redo_action)
+        self.view.add_history_actions(self.undo_action, self.redo_action)
 
 
     def add_file(self,file_obj:FileObject):

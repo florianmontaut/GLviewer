@@ -2,7 +2,8 @@
 # view/main_window.py
 
 from PyQt6 import uic
-from PyQt6 import QtWidgets,QtGui
+from PyQt6 import QtWidgets,QtGui,QtCore
+from ressources import theme
 
 import pathlib,os,json
 
@@ -32,9 +33,50 @@ class MainWindow(QtWidgets.QMainWindow):
         # comparaison des essais (modèles thermiques) : fenêtre à part
         self.actionBenchmark = QtGui.QAction("Benchmark window", self)
         self.menuOptions.addAction(self.actionBenchmark)
+        self._init_toolbar()
         self.default_dir=os.path.dirname(__file__)
         #lastest_dir sera mis à jour 
         self.latest_dir=os.path.dirname(__file__)
+
+    def _init_toolbar(self):
+        """
+        Barre d'outils : raccourcis vers les actions les plus utilisées des menus (mêmes
+        QAction, donc même comportement). Undo / Redo : voir add_history_actions.
+        """
+        self.toolbar = QtWidgets.QToolBar("Barre d'outils", self)
+        self.toolbar.setObjectName("main_toolbar")
+        self.toolbar.setMovable(False)
+        self.toolbar.setFloatable(False)
+        self.toolbar.setIconSize(QtCore.QSize(20, 20))
+        self.toolbar.toggleViewAction().setEnabled(False)   # pas de masquage par clic droit
+        self.addToolBar(QtCore.Qt.ToolBarArea.TopToolBarArea, self.toolbar)
+        for action, icon_name, tip in (
+                (self.actionLoad_json,          "open",     "Ouvrir un projet (.json)"),
+                (self.actionSave,               "save",     "Enregistrer le projet (Ctrl+S)"),
+                (None, None, None),
+                (self.actionLoad_csv,           "graphtec", "Charger un fichier Graphtec (.csv)"),
+                (self.actionGeneric_csv_file,   "import",   "Importer un fichier .csv"),
+                (None, None, None),
+                (self.actionBenchmark,          "benchmark","Fenêtre Benchmark"),
+                (self.actionParameters,         "settings", "Paramètres")):
+            if action is None:
+                self.toolbar.addSeparator()
+                continue
+            theme.set_action_icon(action, icon_name)
+            action.setToolTip(tip)
+            self.toolbar.addAction(action)
+        # emplacement d'Undo / Redo (créées par le contrôleur) : après « Enregistrer »
+        self._history_anchor = self.toolbar.actions()[2]
+
+    def add_history_actions(self, undo: QtGui.QAction, redo: QtGui.QAction):
+        """
+        Undo / Redo dans la barre d'outils, après le groupe Ouvrir / Enregistrer (leur
+        info-bulle reprend le texte de l'action : « Undo <dernière action> »).
+        """
+        theme.set_action_icon(undo, "undo")
+        theme.set_action_icon(redo, "redo")
+        self.toolbar.insertActions(self._history_anchor, [undo, redo])
+        self.toolbar.insertSeparator(undo)
 
     def closeEvent(self, event):
         if self.close_guard is not None and not self.close_guard():
