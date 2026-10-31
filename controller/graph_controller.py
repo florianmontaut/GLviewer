@@ -365,6 +365,8 @@ class GraphController(QtCore.QObject):
         # la courbe sélectionnée reste mise en évidence
         self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
         panel.curves[sig].setVisible(sig.visible)
+        # unité de la voie modifiée : la courbe change d'échelle
+        panel.update_units()
         self.update_vbox()
 
     def freeze_updates(self, freeze: bool):

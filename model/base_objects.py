@@ -252,6 +252,7 @@ class FileObject:
         """Ajoute un signal brut ou calculé."""
         pen=self.getDefaultPen()
         sig = SignalObject(self, name,pen)
+        sig.unit = self.channel_unit(name)
         self.signals.append(sig)
         return sig
 
@@ -354,6 +355,18 @@ class FileObject:
             return ids[name]
         columns = list(self.data.columns)
         return f"CH{columns.index(name) + 1}" if name in columns else None
+
+    # unités des fichiers GL -> unités affichées
+    GL_UNITS = {"degC": "°C", "degF": "°F"}
+
+    def channel_unit(self, name) -> str:
+        """Unité d'une voie : celle du GL (relevée à l'import), sinon °C."""
+        params = self.import_params if isinstance(self.import_params, dict) else {}
+        unit = (params.get('channel_units') or {}).get(name)
+        if unit is None or not str(unit).strip():
+            return '°C'
+        unit = str(unit).strip()
+        return self.GL_UNITS.get(unit, unit)
 
     def get_raw_y(self,name):
         """Vraies données brutes (copie)."""
@@ -733,7 +746,8 @@ class SignalObject:
 
         # id : identité de la voie d'un enregistrement à l'autre (ex: voie de puissance
         # d'un modèle thermique, retrouvée même si elle est renommée)
-        arg_to_export= ['id','name','visible','pen','pipeline','analyses','is_reference']
+        arg_to_export= ['id','name','unit','visible','pen','pipeline','analyses',
+                        'is_reference']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['pipeline'] = [(n_id,node.to_dict()) for n_id,node in
                                     obj_params['pipeline'].items()] 
@@ -748,6 +762,8 @@ class SignalObject:
 
 
         sig             =   SignalObject(file_obj, data["name"])
+        # projets antérieurs à la sauvegarde de l'unité : celle du fichier
+        sig.unit        =   data.get("unit", file_obj.channel_unit(data["name"]))
         SignalObject._restore_nodes(sig, data, filter_factory, analysis_factory)
         return sig
 
@@ -847,6 +863,11 @@ class DerivedSignalObject(SignalObject):
         # Pas de cache dynamique
         self._cache = None
         self._cache_valid = True
+
+    @property
+    def unit(self):
+        """Unité du signal parent (modèle, différence...)."""
+        return getattr(self.parent_signal, "unit", "")
 
     @property
     def x(self):

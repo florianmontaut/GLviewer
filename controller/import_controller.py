@@ -276,6 +276,10 @@ class ImportController(QtCore.QObject):
                                                 # numéro de voie du GL par nom de voie
                                                 'channel_ids': {setting['name']: setting['channel']
                                                                 for setting in channels},
+                                                # unité de chaque voie (« degC », « V »...)
+                                                'channel_units': {setting['name']:
+                                                                  setting['unit'].strip()
+                                                                  for setting in channels},
                                                 },
                                             data            = data
                                             )

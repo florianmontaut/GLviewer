@@ -1,7 +1,7 @@
 # controller/plot_panel.py
 """
-Panneau de graphique : un tracé (PlotItem) avec son axe des temps, son axe vertical et
-ses courbes. Le GraphController gère une liste de panneaux (un seul pour l'instant) ;
+Panneau de graphique : un tracé (PlotItem) avec son axe des temps, ses axes verticaux
+(un par unité) et ses courbes. Le GraphController gère une liste de panneaux (un seul pour l'instant) ;
 tout ce qui dépend d'un tracé particulier (courbes, limites de zoom, mise à l'échelle,
 conversion écran -> données) est ici.
 """
@@ -87,11 +87,79 @@ class AdaptiveAxisItem(pg.AxisItem):
         return super().tickSpacing(minVal, maxVal, size)
 
 
+def curve_unit(sig) -> str:
+    """Unité d'une courbe (« °C », « W »...) : chaque unité a son échelle verticale."""
+    return str(getattr(sig, "unit", "") or "").strip()
+
+
+class UnitScale:
+    """
+    Échelle verticale d'une unité secondaire d'un panneau : sa ViewBox (axe X lié à celle
+    du panneau) et son axe à droite. Sa plage suit celle de l'échelle principale par une
+    relation affine (y = a * y_principal + b) : zoomer ou déplacer le graphique déplace
+    toutes les courbes ensemble ; glisser ou zoomer sur l'axe de droite change a et b.
+    """
+
+    def __init__(self, unit: str, main_vb: pg.ViewBox, parent: pg.PlotItem):
+        self.unit = unit
+        self.main_vb = main_vb
+        self.axis = None
+        self.a, self.b = 1.0, 0.0
+        self.vb = pg.ViewBox(enableMenu=False)
+        self.vb.setParentItem(parent)
+        # sous la ViewBox principale : elle reçoit la souris (zoom, déplacement, menu)
+        self.vb.setZValue(main_vb.zValue() - 1)
+        self.vb.setMouseEnabled(x=False, y=True)
+        self.vb.setXLink(main_vb)
+        self.vb.setGeometry(main_vb.geometry())
+        main_vb.sigResized.connect(self._sync_geometry)
+        main_vb.sigYRangeChanged.connect(self._follow_main)
+        self.vb.sigRangeChangedManually.connect(self.store_relation)
+
+    def _sync_geometry(self):
+        self.vb.setGeometry(self.main_vb.geometry())
+        self.vb.linkedViewChanged(self.main_vb, self.vb.XAxis)
+
+    def _follow_main(self):
+        m0, m1 = self.main_vb.viewRange()[1]
+        self.vb.setYRange(self.a * m0 + self.b, self.a * m1 + self.b, padding=0)
+
+    def store_relation(self, *args):
+        """Relation entre la plage de cette échelle et celle de l'échelle principale."""
+        m0, m1 = self.main_vb.viewRange()[1]
+        s0, s1 = self.vb.viewRange()[1]
+        if m1 - m0 == 0:
+            return
+        self.a = (s1 - s0) / (m1 - m0)
+        self.b = s0 - self.a * m0
+
+    def fit(self, bounds: tuple[float, float] | None):
+        """Plage ajustée aux données (bornes y0, y1), marge de 2 %."""
+        if bounds is None:
+            return
+        y0, y1 = bounds
+        margin = 0.02 * max(y1 - y0, 1e-9)
+        self.vb.setYRange(y0 - margin, y1 + margin, padding=0)
+        self.store_relation()
+
+    def remove(self):
+        self.main_vb.sigResized.disconnect(self._sync_geometry)
+        self.main_vb.sigYRangeChanged.disconnect(self._follow_main)
+        self.vb.setXLink(None)
+        self.vb.setParentItem(None)
+        scene = self.vb.scene()
+        if scene is not None:
+            scene.removeItem(self.vb)
+
+
 class PlotPanel:
     """
     Un tracé du graphique et ses courbes (signal -> SignalCurveItem).
         display_y : callable(signal) -> ordonnées tracées (données manquantes selon les
                     options du graphique, voir GraphController._display_y)
+    Une échelle verticale par unité : l'unité principale (celle des options du
+    graphique, Y unit, si une courbe l'utilise, sinon la première) à gauche, chaque autre
+    unité (UnitScale) sur un axe à droite.
     """
 
     # dézoom maximal : marge autour des courbes visibles, en part de leur étendue
@@ -100,7 +168,12 @@ class PlotPanel:
 
     def __init__(self, display_y, opts: dict):
         self.display_y = display_y
+        self.opts = opts
         self.curves = {}                # SignalObject -> SignalCurveItem
+        self.main_unit = None           # unité de l'axe de gauche
+        self.scales = {}                # unité secondaire -> UnitScale (ordre des axes)
+        self._extra_axes = []           # axes à droite au-delà du premier
+        self._dark = None
         self.time_axis = RelativeTimeAxis(orientation='bottom')
         self.plot = pg.PlotItem(None, axisItems={"bottom": self.time_axis,
                                                  "left": AdaptiveAxisItem('left')})
@@ -125,18 +198,143 @@ class PlotPanel:
         if opts["downsample"]:
             self.plot.setDownsampling(mode=opts["downsample_type"],
                                       ds=opts["downsample_ratio"])
+        # courbes des échelles secondaires : hors du PlotItem, réglées une à une
+        for sig, curve in self.curves.items():
+            if self.unit_of(sig) != self.main_unit:
+                self._configure_secondary(curve)
+
+    def _configure_secondary(self, curve):
+        curve.setDownsampling(*self.plot.downsampleMode())
+        curve.setClipToView(self.plot.clipToViewMode())
 
     def apply_options(self, opts: dict):
         """Options du graphique (Options > Graph settings) : axes, graduations, grille."""
+        self.opts = opts
         self._apply_downsampling(opts)
         self.xp_axis.setLabel(text=opts["X_title"], units=opts["X_unit"])
         self.xp_axis.setTickSpacing(opts["X_major_t"], opts["X_minor_t"])
-        self.yp_axis.setLabel(text=opts["Y_title"], units=opts["Y_unit"])
         self.yp_axis.setTickSpacing(opts["Y_major_t"], opts["Y_minor_t"])
         self.plot.showGrid(x=opts["X_grid"], y=opts["Y_grid"], alpha=0.4)
+        # l'unité principale peut changer (Y unit)
+        self.update_units()
 
     def apply_theme(self, dark: bool):
+        self._dark = dark
         theme.style_plot(self.plot, dark)
+        c = theme.colors(dark)
+        for axis in self._extra_axes:
+            axis.setPen(pg.mkPen(c["graph_axis"]))
+            axis.setTextPen(pg.mkPen(c["graph_text"]))
+
+    # ---------------- unités ----------------
+
+    def unit_of(self, sig) -> str:
+        return curve_unit(sig)
+
+    def units(self) -> list[str]:
+        """Unités des courbes du panneau, l'unité principale en premier."""
+        units = list(dict.fromkeys(self.unit_of(sig) for sig in self.curves))
+        preferred = str(self.opts.get("Y_unit", "") or "").strip()
+        if preferred in units:
+            units.remove(preferred)
+            units.insert(0, preferred)
+        return units
+
+    def view_of(self, sig) -> pg.ViewBox:
+        """ViewBox où la courbe de sig est tracée (celle de son unité)."""
+        unit = self.unit_of(sig)
+        scale = self.scales.get(unit) if unit != self.main_unit else None
+        return scale.vb if scale is not None else self.vb
+
+    def update_units(self):
+        """
+        Échelles du panneau mises à jour selon les unités des courbes (courbe ajoutée,
+        retirée, unité d'une voie modifiée, unité principale des options changée) : les
+        courbes changent d'échelle si besoin, les échelles inutiles sont retirées.
+        """
+        units = self.units()
+        main = units[0] if units else None
+        secondary = units[1:]
+        new_scales = [unit for unit in secondary if unit not in self.scales]
+        for unit in new_scales:
+            self.scales[unit] = UnitScale(unit, self.vb, self.plot)
+        self.main_unit = main
+
+        # courbes déplacées AVANT de retirer les échelles inutiles : une ViewBox retirée
+        # est détruite avec les courbes qu'elle contient encore
+        for sig, curve in self.curves.items():
+            target = self.view_of(sig)
+            current = curve.getViewBox()
+            if current is target:
+                continue
+            if current is self.vb:
+                self.plot.removeItem(curve)
+            elif current is not None:
+                current.removeItem(curve)
+            # ViewBox.addItem passe la courbe dans la scène avant de la rattacher à la
+            # ViewBox : clipToView chercherait la ViewBox (rétabli ci-dessous)
+            curve.setClipToView(False)
+            if target is self.vb:
+                self.plot.addItem(curve)
+            else:
+                target.addItem(curve)
+                self._configure_secondary(curve)
+        for unit in [u for u in self.scales if u not in secondary]:
+            self.scales.pop(unit).remove()
+        # ordre des axes de droite : celui des unités
+        self.scales = {unit: self.scales[unit] for unit in secondary}
+        self._layout_axes()
+        for unit in new_scales:
+            self.scales[unit].fit(self._y_bounds(unit))
+
+    def _layout_axes(self):
+        """Axe de gauche à l'unité principale, un axe à droite par unité secondaire."""
+        y_unit = str(self.opts.get("Y_unit", "") or "").strip()
+        if self.main_unit is None or self.main_unit == y_unit:
+            self.yp_axis.setLabel(text=self.opts["Y_title"], units=self.opts["Y_unit"])
+        else:
+            self.yp_axis.setLabel(text=self.main_unit)
+
+        scales = list(self.scales.values())
+        # axes supplémentaires : colonnes 3, 4... de la mise en page du PlotItem (la
+        # colonne 2 est l'axe de droite du PlotItem)
+        while len(self._extra_axes) < len(scales) - 1:
+            axis = AdaptiveAxisItem('right')
+            axis.enableAutoSIPrefix(False)
+            self.plot.layout.addItem(axis, 2, 3 + len(self._extra_axes))
+            self._extra_axes.append(axis)
+        while len(self._extra_axes) > max(len(scales) - 1, 0):
+            axis = self._extra_axes.pop()
+            self.plot.layout.removeItem(axis)
+            axis.setParentItem(None)
+            if axis.scene() is not None:
+                axis.scene().removeItem(axis)
+        if self._dark is not None:
+            self.apply_theme(self._dark)
+
+        right = self.plot.getAxis('right')
+        if scales:
+            self.plot.showAxis('right')
+            right.enableAutoSIPrefix(False)
+        else:
+            self.plot.hideAxis('right')
+            right.linkToView(self.vb)
+        for scale, axis in zip(scales, [right] + self._extra_axes):
+            scale.axis = axis
+            axis.linkToView(scale.vb)
+            axis.setLabel(text=scale.unit)
+
+    def _y_bounds(self, unit) -> tuple[float, float] | None:
+        """Étendue verticale des courbes visibles d'une unité."""
+        lows, highs = [], []
+        for sig, curve in self.curves.items():
+            if self.unit_of(sig) != unit or not curve.isVisible():
+                continue
+            y = np.asarray(self.display_y(sig), dtype=float)
+            if np.isfinite(y).any():
+                lows.append(np.nanmin(y))
+                highs.append(np.nanmax(y))
+        return (float(min(lows)), float(max(highs))) if lows else None
 
     # ---------------- courbes ----------------
 
@@ -146,8 +344,8 @@ class PlotPanel:
         curve.setVisible(sig.visible)
         curve.setCurveClickable(True)
         curve.sigClicked.connect(on_clicked)
-        self.plot.addItem(curve)
         self.curves[sig] = curve
+        self.update_units()
         self.update_zoom_limits()
         return curve
 
@@ -155,9 +353,14 @@ class PlotPanel:
         curve = self.curves.pop(sig, None)
         if curve is None:
             return False
-        self.plot.removeItem(curve)
+        view = curve.getViewBox()
+        if view is self.vb:
+            self.plot.removeItem(curve)
+        elif view is not None:
+            view.removeItem(curve)
         curve.setParentItem(None)
         curve.deleteLater()
+        self.update_units()
         self.update_zoom_limits()
         return True
 
@@ -172,6 +375,8 @@ class PlotPanel:
     def autorange(self):
         self.update_zoom_limits()
         self.vb.autoRange()
+        for unit, scale in self.scales.items():
+            scale.fit(self._y_bounds(unit))
 
     def contains(self, scene_pos) -> bool:
         """Point de l'écran (coordonnées de la scène) dans la zone de tracé ?"""
@@ -179,9 +384,10 @@ class PlotPanel:
 
     def update_zoom_limits(self):
         """
-        Limites de zoom de la ViewBox calculées sur les courbes VISIBLES (voies, filtres,
-        signaux dérivés : différence, projection d'un modèle...). Les voies masquées
-        (ex: HZ) et les annotations n'interviennent pas.
+        Limites de zoom de la ViewBox calculées sur les courbes VISIBLES de l'unité
+        principale (voies, filtres, signaux dérivés : différence, projection d'un
+        modèle...). Les voies masquées (ex: HZ) et les annotations n'interviennent pas ;
+        les échelles secondaires suivent l'échelle principale.
             - dézoom maximal : étendue des courbes + ZOOM_OUT_MARGIN de chaque côté
             - zoom maximal   : quelques échantillons en X, 0.01 en Y
         Sans courbe visible, les limites précédentes sont conservées.
@@ -193,6 +399,8 @@ class PlotPanel:
                    if curve.isVisible() and len(sig.x) > 0]
         bounds = []
         for sig in visible:
+            if self.unit_of(sig) != self.main_unit:
+                continue
             x = np.asarray(sig.x, dtype=float)
             # valeur de remplacement des données manquantes comprise : elle doit rester
             # visible
@@ -205,6 +413,11 @@ class PlotPanel:
         x1 = max(b[1] for b in bounds)
         y0 = min(b[2] for b in bounds)
         y1 = max(b[3] for b in bounds)
+        # l'axe des temps couvre aussi les courbes des autres unités
+        for sig in visible:
+            x = np.asarray(sig.x, dtype=float)
+            if np.isfinite(x).any():
+                x0, x1 = min(x0, np.nanmin(x)), max(x1, np.nanmax(x))
 
         # pas d'échantillonnage le plus fin des courbes visibles
         steps = [np.min(np.diff(np.asarray(sig.x[:100], dtype=float)))
@@ -236,8 +449,9 @@ class PlotPanel:
         y = np.asarray(sig.y, dtype=float)
         if x.size == 0:
             return None
-        target = self.vb.mapSceneToView(scene_pos)
-        px_w, px_h = self.vb.viewPixelSize()
+        vb = self.view_of(sig)              # échelle de l'unité de la courbe
+        target = vb.mapSceneToView(scene_pos)
+        px_w, px_h = vb.viewPixelSize()
         distance = ((x - target.x()) / px_w)**2 + ((y - target.y()) / px_h)**2
         if np.all(np.isnan(distance)):
             return None
