@@ -24,6 +24,7 @@ class qSignalType(Enum):
     MODEL       = auto()
     FFT         = auto()
     FORMULA     = auto()    # voie calculée par une formule (model.computed)
+    ALIGN       = auto()    # recalage d'un fichier dans le temps (alignment_controller)
     DEL         = auto()
     SELECT      = auto()
     CHECK       = auto()

@@ -282,6 +282,14 @@ class GraphTreeController(QtCore.QObject):
         text_item.apply_annotation(annotation)
         self._annotations[annotation.id] = annotation
 
+    def apply_theme(self, dark: bool):
+        """Textes redessinés pour le thème choisi (noir par défaut lisible en sombre)."""
+        for annotation_id, text_item in self.textItems.items():
+            annotation = self._annotations.get(annotation_id)
+            text_item.dark = dark
+            if annotation is not None:
+                text_item.apply_annotation(annotation)
+
     def remove_annotation(self, annotation_id):
         self._annotations.pop(annotation_id, None)
         text_item = self.textItems.pop(annotation_id, None)

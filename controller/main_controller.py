@@ -43,6 +43,7 @@ from controller.commands.computed_channel import (AddComputedChannelCommand,
                                                   RemoveComputedChannelCommand,
                                                   ModifyComputedChannelCommand)
 from controller.benchmark_controller import BenchmarkController
+from controller.alignment_controller import AlignmentController
 
 from model.tree_item import TreeItem
 
@@ -117,6 +118,9 @@ class MainController(QtCore.QObject):
         self._connect_menu_signals()
         self._connect_cursor_signals()
         self._connect_channel_signals()
+        # recalage d'un fichier dans le temps (« Align in time... »)
+        self.alignment_ctrl = AlignmentController(self.graph_ctrl, self.view)
+        self.alignment_ctrl.accepted.connect(self._on_alignment_accepted)
         self._mark_saved()
 
     # -------------------------------------------------------------------------
@@ -243,6 +247,7 @@ class MainController(QtCore.QObject):
 
         self.view.addAction(self.undo_action)
         self.view.addAction(self.redo_action)
+        self.view.add_history_actions(self.undo_action, self.redo_action)
 
 
     def add_file(self,file_obj:FileObject):
@@ -285,6 +290,7 @@ class MainController(QtCore.QObject):
         """
         if not self.confirm_discard():
             return
+        self.alignment_ctrl.cancel()
         # nettoyage du graphique de l'ancien workspace
         for sig in list(self.graph_ctrl.curves.keys()):
             self.graph_ctrl.remove_signal_curve(sig)
@@ -844,6 +850,7 @@ class MainController(QtCore.QObject):
             self.graph_ctrl.update_signal(sig)
             if self.model is not None:
                 self.model.refresh_object(sig)
+                self.model.refresh_check_state(sig.file)
 
     def _on_visibility_changed(self, item, index=None):
         """
@@ -920,6 +927,8 @@ class MainController(QtCore.QObject):
         Returns:
             la voie de référence (action « référence ») si elle appartenait au fichier
         """
+        if self.alignment_ctrl.file is file_obj:
+            self.alignment_ctrl.cancel()
         ref = self.workspace.reference_signal
         removed_ref = ref if ref is not None and ref.file is file_obj else None
         if removed_ref is not None:
@@ -1298,6 +1307,9 @@ class MainController(QtCore.QObject):
         if action_type == custom_types.qSignalType.FORMULA:
             self.add_computed_channel()
             return
+        if action_type == custom_types.qSignalType.ALIGN:
+            self.start_alignment()
+            return
         signal = self._current_signal()
         if signal is None:
             return
@@ -1341,6 +1353,25 @@ class MainController(QtCore.QObject):
             return item.obj
         sig = item.action_signal
         return sig.file if isinstance(sig, SignalObject) else None
+
+    def start_alignment(self, file_obj=None):
+        """« Align in time... » : recalage à vue du fichier sélectionné (ou de la voie)."""
+        file_obj = file_obj or self._current_file()
+        if file_obj is not None:
+            self.alignment_ctrl.start(file_obj)
+
+    def _on_alignment_accepted(self, file_obj, delta):
+        """Recalage validé : décalage du fichier (annulable), analyses recalculées."""
+        if file_obj.removed or abs(delta) < 1e-12:
+            for sig in list(self.graph_ctrl.curves):
+                if getattr(sig, "file", None) is file_obj:
+                    self.graph_ctrl.update_signal(sig)
+            return
+        cmd = ModifyFileParamsCommand(self, file_obj, {"offset": file_obj.offset + delta})
+        cmd.setText(f"Align {file_obj.name} ({delta:+g} s)")
+        self.workspace_ctrl.undo_stack.push(cmd)
+        self.view.statusBar().showMessage(
+                f"{file_obj.label or file_obj.name} recalé de {delta:+g} s", 5000)
 
     def add_computed_channel(self, file_obj=None, defaults=None):
         """

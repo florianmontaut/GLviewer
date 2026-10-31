@@ -4,6 +4,8 @@ import pathlib
 import pyqtgraph as pg
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from ressources import theme
+
 PATH = pathlib.Path(__file__).parent
 
 
@@ -40,6 +42,7 @@ class BenchmarkWindow(QtWidgets.QWidget):
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
         self.plot = pg.PlotWidget()
+        self._apply_theme()
         self.plot.showGrid(x=True, y=True, alpha=0.3)
         self.legend = self.plot.addLegend()
 
@@ -57,3 +60,13 @@ class BenchmarkWindow(QtWidgets.QWidget):
         layout.addLayout(controls)
         layout.addWidget(splitter, 1)
         layout.addWidget(self.info)
+
+    def _apply_theme(self):
+        """Graphique aux couleurs du thème courant."""
+        self.plot.setBackground(theme.colors()["graph_bg"])
+        theme.style_plot(self.plot.getPlotItem())
+
+    def showEvent(self, event):
+        # thème changé depuis la création de la fenêtre (option « Dark mode »)
+        self._apply_theme()
+        super().showEvent(event)

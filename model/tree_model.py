@@ -1,10 +1,9 @@
 
 # model/tree_model.py
 import numpy as np
-import pathlib
 
 from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel
-from PyQt6.QtGui import QColor,QBrush,QFont,QIcon
+from PyQt6.QtGui import QBrush,QFont
 from model.tree_item import TreeItem
 from model.benchmark import power_text
 from model.base_objects import FileObject, SignalObject,Workspace
@@ -14,8 +13,8 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from model.base_objects import SignalObject
 from ressources.custom_items import itemType,ModelChangeEvent,ActionModifier
+from ressources import theme
 
-PATH=pathlib.Path(__file__).parent.parent
 
 
 class PipelineTreeModel(QAbstractItemModel):
@@ -27,11 +26,6 @@ class PipelineTreeModel(QAbstractItemModel):
 
         self.workspace = workspace
 
-        self.icon_file              = QIcon(str(PATH)+"/ressources/icons/file.svg")
-        self.icon_signal_raw        = QIcon(str(PATH)+"/ressources/icons/signal_raw.svg")
-        self.icon_signal_modified   = QIcon(str(PATH)+"/ressources/icons/signal_modified.svg")
-        self.icon_filter            = QIcon(str(PATH)+"/ressources/icons/filter.svg")
-        self.icon_signal_reference  = QIcon(str(PATH)+"/ressources/icons/signal_reference.svg")
         #! Comment le code peut-il fonctionner sans erreur, TreeItem attend data, role et parent:
         self.root = TreeItem("Workspace")
 
@@ -288,45 +282,49 @@ class PipelineTreeModel(QAbstractItemModel):
                 return font
 
         if role == Qt.ItemDataRole.ForegroundRole:
+            # signal de référence en rouge ; les autres, couleur de texte du thème
             if isinstance(obj, SignalObject) and obj.is_reference:
-                return QBrush(QColor("#D32F2F"))  # rouge profond
-            else:
-                return QBrush(QColor("#000000"))  # noir profond
+                return QBrush(theme.color("danger"))
 
     # ---------------- Checkbox ----------------
         if (role == Qt.ItemDataRole.CheckStateRole and (obj_type == itemType.DERIVED or
             obj_type == itemType.RAW) and col == 0):
             return Qt.CheckState.Checked if obj.visible else Qt.CheckState.Unchecked
+        # fichier : toutes ses courbes affichées / masquées, ou une partie seulement
+        if role == Qt.ItemDataRole.CheckStateRole and obj_type == itemType.FILE and col == 0:
+            states = {curve.visible for curve in self.file_curves(obj)}
+            if len(states) != 1:
+                return Qt.CheckState.PartiallyChecked
+            return Qt.CheckState.Checked if states.pop() else Qt.CheckState.Unchecked
 
     # ---------------- Background color ----------------
         if role == Qt.ItemDataRole.BackgroundRole:
             if obj_type == itemType.RAW:
-                # Couleur de fond = couleur du signal
-                color = QColor(obj.pen.color())
-                # léger alpha pour rester lisible
-                color.setAlpha(150)
-                return QBrush(color)
+                # fond très atténué de la couleur du signal (l'icône porte la couleur pleine)
+                return theme.row_tint(obj.pen.color())
 
         # Icône uniquement sur la colonne 0
         if role == Qt.ItemDataRole.DecorationRole and col == 0:
 
             # FileObject
             if obj_type == itemType.FILE:
-                return self.icon_file
+                return theme.icon("file")
 
             # SignalObject
             if obj_type == itemType.RAW:
 
+                # forme selon le type de signal, tracée à la couleur de sa courbe
                 if obj.is_reference:
-                    return self.icon_signal_reference
+                    name = "signal_reference"
                 elif obj.is_modified:
-                    return self.icon_signal_modified
+                    name = "signal_modified"
                 else:
-                    return self.icon_signal_raw
+                    name = "signal_raw"
+                return theme.icon(name, obj.pen.color())
 
             # FilterNode
             if obj_type == itemType.FILTER:
-                return self.icon_filter
+                return theme.icon("filter")
 
         return None
 
@@ -357,17 +355,51 @@ class PipelineTreeModel(QAbstractItemModel):
         obj = item.obj
         obj_type = obj.item_type
 
-        if obj_type == itemType.RAW and role == Qt.ItemDataRole.CheckStateRole:
-            #value est un int ! pas un Qt.CheckState, il faut donc utiliser la méthode .value
-            #afin de récupèrer l'int équivalent de enum Qt.CheckState
-            obj.visible = (value == Qt.CheckState.Checked.value)
+        if role != Qt.ItemDataRole.CheckStateRole:
+            return False
+        #value est un int ! pas un Qt.CheckState, il faut donc utiliser la méthode .value
+        #afin de récupèrer l'int équivalent de enum Qt.CheckState
+        visible = value in (Qt.CheckState.Checked.value, Qt.CheckState.Checked)
+
+        if obj_type in (itemType.RAW, itemType.DERIVED):
+            obj.visible = visible
             #le troisième argument de emit permet d'indiquer ce qui à été modifié
             self.dataChanged.emit(  index,
                                     index,
                                     [Qt.ItemDataRole.CheckStateRole]
                                 )
+            self.refresh_check_state(obj.file)
+            return True
+
+        if obj_type == itemType.FILE:
+            # toutes les courbes de l'enregistrement : chacune notifiée (graphique...)
+            for curve in self.file_curves(obj):
+                if curve.visible != visible:
+                    curve.visible = visible
+                    curve_item = self.find_item(item, curve)
+                    if curve_item is not None:
+                        curve_index = self.index_from_item(curve_item)
+                        self.dataChanged.emit(curve_index, curve_index,
+                                              [Qt.ItemDataRole.CheckStateRole])
+            self.refresh_check_state(obj)
             return True
         return False
+
+    @staticmethod
+    def file_curves(file_obj) -> list:
+        """Courbes d'un enregistrement : ses voies et les courbes de leurs analyses."""
+        curves = []
+        for sig in file_obj.signals:
+            curves.append(sig)
+            curves.extend(sig.derived_signals)
+        return curves
+
+    def refresh_check_state(self, file_obj):
+        """Case à cocher d'un fichier (toutes / une partie / aucune de ses courbes)."""
+        item = self.find_item(self.root, file_obj)
+        if item is not None:
+            index = self.index_from_item(item)
+            self.dataChanged.emit(index, index, [Qt.ItemDataRole.CheckStateRole])
 
     def flags(self, index):
         if not index.isValid():
@@ -376,7 +408,7 @@ class PipelineTreeModel(QAbstractItemModel):
         obj = index.internalPointer().obj
         flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
 
-        if isinstance(obj, SignalObject):
+        if isinstance(obj, SignalObject) or obj.item_type == itemType.FILE:
             flags |= Qt.ItemFlag.ItemIsUserCheckable
 
         return flags

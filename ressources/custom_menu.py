@@ -48,6 +48,10 @@ class BaseContextMenu(QtCore.QObject):
                                         label="Add a computed channel",
                                         enabled_if= lambda s: s.has_selection or s.has_file
                                         ),
+                    qSignalType.ALIGN : ActionSpec(
+                                        label="Align in time...",
+                                        enabled_if= lambda s: s.has_selection or s.has_file
+                                        ),
                     qSignalType.MODEL : ActionSpec(
                                         label="Get thermal model",
                                         enabled_if= lambda s: s.has_selection
