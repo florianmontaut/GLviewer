@@ -172,3 +172,38 @@ def test_missing_data_file_reported_from_recent_files(ctrl, csv_files, tmp_path,
                                    "import_params": {}})
 
     assert len(warnings_shown) == 1 and "introuvable" in warnings_shown[0][2]
+
+
+# ---------------- tracés des courbes ----------------
+
+@pytest.mark.parametrize("style", ["SolidLine", "DashLine", "DotLine"])
+def test_pen_round_trip_keeps_style(style):
+    from PyQt6 import QtCore, QtGui
+    from ressources.custom_struct_functions import QPen_to_dict, dict_to_QPen
+    pen = QtGui.QPen(QtGui.QColor("#1f77b4"))
+    pen.setStyle(getattr(QtCore.Qt.PenStyle, style))
+    restored = dict_to_QPen(json.loads(json.dumps(QPen_to_dict(pen))))
+    assert restored.style() == pen.style()
+    assert restored.dashPattern() == pen.dashPattern()
+
+
+def test_pen_without_dash_pattern_reloaded_as_solid():
+    """
+    Projets enregistrés avant le correctif : trait plein relu en pointillé sans motif,
+    que Qt ne dessine pas en largeur 2 (courbe sélectionnée invisible).
+    """
+    from PyQt6 import QtCore
+    from ressources.custom_struct_functions import dict_to_QPen
+    pen = dict_to_QPen({"style": QtCore.Qt.PenStyle.CustomDashLine.value, "color": "#ff1f77b4",
+                        "width": 1.0, "dash": [], "cosmetic": True, "cap": 16, "join": 64})
+    assert pen.style() == QtCore.Qt.PenStyle.SolidLine
+
+
+def test_custom_dash_pattern_kept():
+    from PyQt6 import QtCore
+    from ressources.custom_struct_functions import dict_to_QPen
+    pen = dict_to_QPen({"style": QtCore.Qt.PenStyle.CustomDashLine.value, "color": "#ff1f77b4",
+                        "width": 1.0, "dash": [3.0, 1.0], "cosmetic": True, "cap": 16,
+                        "join": 64})
+    assert pen.style() == QtCore.Qt.PenStyle.CustomDashLine
+    assert pen.dashPattern() == [3.0, 1.0]

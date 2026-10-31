@@ -266,10 +266,19 @@ def dict_to_QPen(data):
         return enum_cls(int(value))
 
     pen = QtGui.QPen()
-    pen.setStyle(_qt_enum(QtCore.Qt.PenStyle,data["style"]))
+    style = _qt_enum(QtCore.Qt.PenStyle,data["style"])
+    dash = data.get("dash") or []
+    # setDashPattern passe le style en CustomDashLine : un trait plein (motif vide)
+    # devenait un pointillé sans motif, que Qt ne dessine plus dès une largeur de 2
+    # (courbe sélectionnée invisible). Projets déjà enregistrés ainsi : trait plein
+    if style == QtCore.Qt.PenStyle.CustomDashLine and not dash:
+        style = QtCore.Qt.PenStyle.SolidLine
     pen.setColor(QtGui.QColor(data["color"]))
     pen.setWidthF(data["width"])
-    pen.setDashPattern(data["dash"])
+    if style == QtCore.Qt.PenStyle.CustomDashLine:
+        pen.setDashPattern(dash)
+    else:
+        pen.setStyle(style)
     pen.setCosmetic(data["cosmetic"])
     pen.setCapStyle(_qt_enum(QtCore.Qt.PenCapStyle,data["cap"]))
     pen.setJoinStyle(_qt_enum(QtCore.Qt.PenJoinStyle,data["join"]))
