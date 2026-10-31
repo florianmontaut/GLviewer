@@ -635,7 +635,7 @@ class ImportController(QtCore.QObject):
             file_obj = FileObject(file_caracs)
             # paramètres du fichier (absents des projets plus anciens)
             file_obj.set_params({key: file_data[key]
-                                 for key in ('offset','start_x','stop_x','label')
+                                 for key in ('sampling','offset','start_x','stop_x','label')
                                  if file_data.get(key) is not None})
             file_obj.signals_from_dict(file_data, FilterFactory(),AnalysisFactory())
             ws.add_file(file_obj)

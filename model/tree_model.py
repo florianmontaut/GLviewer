@@ -481,10 +481,12 @@ class PipelineTreeModel(QAbstractItemModel):
         self.dataChanged.emit(index, index, [Qt.ItemDataRole.DisplayRole,
                                              Qt.ItemDataRole.ToolTipRole])
 
-    def replace_node(self, sig: SignalObject, old_node, new_node):
+    def replace_node(self, sig: SignalObject, old_node, new_node, notify: bool = True):
         """
         Remplace un node par sa version modifiée (nodes immutables : modifier un
         paramètre crée un nouveau node, avec un nouvel id).
+            notify : node_event émis (sélection et ParameterTree sur le node) ; False
+                     quand le node suit une autre modification (ex: période du fichier)
         """
         signal_item = self.find_signal_item(sig)
         if signal_item is None:
@@ -504,7 +506,8 @@ class PipelineTreeModel(QAbstractItemModel):
                                 index,
                                 [Qt.ItemDataRole.DisplayRole,
                                 Qt.ItemDataRole.DecorationRole])
-        self.emit_node_event(ActionModifier.MODIFY_ACTION, item)
+        if notify:
+            self.emit_node_event(ActionModifier.MODIFY_ACTION, item)
 
 
     # ---------------------- Search ----------------------

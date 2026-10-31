@@ -27,6 +27,8 @@ from controller.cursor_controller import CursorController
 from controller.commands.annotations import (AddAnnotationCommand, RemoveAnnotationCommand,
                                              ModifyAnnotationCommand)
 from controller.commands.remove_file import RemoveFileCommand
+from controller.commands.file_params import ModifyFileParamsCommand
+from ressources.custom_commands import od_replace
 from controller.channel_tree_controller import ChannelTreeController
 from model.channel_tree_model import ChannelTreeModel
 from model.channels import (MATCHING_ASK, MATCHING_MODES, MATCHING_SETTINGS, group_channels,
@@ -1161,19 +1163,12 @@ class MainController(QtCore.QObject):
             self._modify_computed_channel(ctx, new_params)
             return
         if ctx.filter_id is None and ctx.analysis_id is None:
+            if isinstance(sig, FileObject):
+                # paramètres du fichier : annulables (période, décalage, troncatures...)
+                self._modify_file_params(ctx, new_params)
+                return
             sig.set_params(new_params)
-            if isinstance(sig,SignalObject):
-                self.graph_ctrl.update_signal(sig)
-            else:
-                #signal est un FileObject, il faut mettre à jour toutes les courbes associées
-                for signal in sig.signals:
-                    self.graph_ctrl.update_signal(signal)
-                # libellé de l'arbre (étiquette du fichier)
-                self.model.refresh_object(sig)
-                self.channel_model.rebuild()
-                # décalage / troncature : données d'entrée des analyses modifiées
-                self._refresh_derived()
-                self._refresh_benchmark()
+            self.graph_ctrl.update_signal(sig)
             return
 
         # ActionRequest.index est une POSITION (int) : on la retrouve à partir de l'id
@@ -1430,6 +1425,47 @@ class MainController(QtCore.QObject):
                 return
         self.workspace_ctrl.undo_stack.push(ModifyComputedChannelCommand(self, sig, changed))
         QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
+
+    def _modify_file_params(self, ctx, new_params):
+        file_obj = ctx.signal
+        changed = {k: v for k, v in new_params.items() if file_obj.get_param(k) != v}
+        if not changed:
+            return
+        try:
+            cmd = ModifyFileParamsCommand(self, file_obj, changed)
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(self.view, "Paramètres du fichier", str(e))
+            # valeurs précédentes remises dans l'arbre (différé : son propre signal)
+            QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
+            return
+        self.workspace_ctrl.undo_stack.push(cmd)
+
+    def _apply_file_params(self, file_obj, params: dict, filter_swaps=()):
+        """
+        Paramètres d'un fichier (ModifyFileParamsCommand) : filtres passe-bas suivant
+        la période, courbes, arbres, analyses et voies calculées.
+            filter_swaps : [(signal, filtre actuel, filtre remplaçant)]
+        """
+        for sig, old, new in filter_swaps:
+            sig.pipeline = od_replace(sig.pipeline, old.id, new.id, new)
+            sig.pipeline_version += 1
+            if self.model is not None:
+                self.model.replace_node(sig, old, new, notify=False)
+        file_obj.set_params(params)
+        for signal in file_obj.signals:
+            self.graph_ctrl.update_signal(signal)
+        if self.model is not None:
+            # libellé de l'arbre (étiquette du fichier, « * » si modifié)
+            self.model.refresh_object(file_obj)
+        self.channel_model.rebuild()
+        # période / décalage / troncature : données d'entrée des analyses modifiées
+        self._refresh_derived()
+        self._refresh_benchmark()
+        if getattr(self.param_ctrl, "_signal", None) is file_obj:
+            # valeurs affichées à jour (undo / redo) ; différé : l'arbre peut être
+            # en train d'émettre
+            ctx = SelectionContext(role=itemType.FILE, signal=file_obj)
+            QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
 
     def _refresh_computed(self):
         """

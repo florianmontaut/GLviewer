@@ -193,7 +193,6 @@ class ComputedSignal(SignalObject):
 
     def _source_key(self) -> tuple:
         """État de tout ce dont dépend la formule : un changement impose un recalcul."""
-        window = self.file.window()
         files = tuple((f.id, f.removed) for f in self._files())
         if self in _computing:
             return ("cycle",)
@@ -204,8 +203,7 @@ class ComputedSignal(SignalObject):
             refs = ("error", str(e))
         finally:
             _computing.remove(self)
-        return (tuple(self.formula_params().items()), self.file.offset, window.start,
-                window.stop, files, refs)
+        return (tuple(self.formula_params().items()), self.file.time_key(), files, refs)
 
     def input_key(self) -> tuple:
         return (self.pipeline_version, self._source_key())

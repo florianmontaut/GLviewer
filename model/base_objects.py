@@ -52,6 +52,19 @@ class FileObject:
                                             'expanded':True,
                                             'children':
                                                     {
+                                                    # période réelle de l'enregistrement
+                                                    # (ex: .txt sans colonne temps importé
+                                                    # avec la période par défaut)
+                                                    'Sampling period':{
+                                                                        'type':'float',
+                                                                        'default':1.0,
+                                                                        'limits':[1e-9,None],
+                                                                        'suffix':'s',
+                                                                        'siPrefix':True,
+                                                                        'decimals':6,
+                                                                        "readonly": False,
+                                                                        "key": "sampling"
+                                                                        },
                                                     'Time offset':{
                                                                         'type':'float',
                                                                         'default':0.0,
@@ -100,6 +113,8 @@ class FileObject:
         self.id = uuid.uuid4().hex
 
         self.label = getattr(self, "label", "")    # point de fonctionnement de l'essai
+        # période lue à l'import (la période peut être corrigée, voir set_sampling)
+        self.imported_sampling = self.sampling
         # fichier retiré de l'espace de travail (conservé pour l'undo)
         self.removed = False
         self.signals = []   # Liste de SignalObject
@@ -123,23 +138,48 @@ class FileObject:
         if time is not None:
             if  time != self.offset:
                 self.offset = time
-                self._raw_x = None
-                self._window = None
-                if isinstance(self.data.index, pd.MultiIndex):
-                    #on retire l'index time existant
-                    self.data = self.data.reset_index(level = 1,drop = True)
-                #ajout d'une colonne Time / pas besoin de l'insérer en tête de la dataFrame
-                #comme dans les versions précédentes
-                self.data['Time'] = np.linspace(self.offset,
-                                                self.offset+(self.n_samples-1)*self.sampling,
-                                                self.n_samples)
-                #on définit la nouvelle colonne time comme deuxième index
-                self.data = self.data.set_index('Time',append = True)
+                self._rebuild_time()
+
+    def set_sampling(self, period):
+        """
+        Période d'échantillonnage réelle (s) : l'axe des temps est recalculé, les
+        valeurs ne changent pas. Les troncatures (en secondes) s'appliquent au nouvel axe.
+        """
+        if period is None or period == self.sampling:
+            return
+        if not period > 0:
+            raise ValueError("The sampling period must be > 0")
+        self.sampling = float(period)
+        self._rebuild_time()
+
+    def _rebuild_time(self):
+        """Axe des temps (2e niveau de l'index) : décalage + n * période."""
+        self._raw_x = None
+        self._window = None
+        if isinstance(self.data.index, pd.MultiIndex):
+            #on retire l'index time existant
+            self.data = self.data.reset_index(level = 1,drop = True)
+        #ajout d'une colonne Time / pas besoin de l'insérer en tête de la dataFrame
+        #comme dans les versions précédentes
+        self.data['Time'] = np.linspace(self.offset,
+                                        self.offset+(self.n_samples-1)*self.sampling,
+                                        self.n_samples)
+        #on définit la nouvelle colonne time comme deuxième index
+        self.data = self.data.set_index('Time',append = True)
+
+    def time_key(self) -> tuple:
+        """
+        État de l'axe des temps du fichier (période, décalage, troncatures) : sert à
+        détecter les analyses et voies calculées périmées.
+        """
+        window = self.window()
+        return (self.sampling, self.offset, window.start, window.stop)
 
     @property
     def display_name(self):
         """Le signal a-t-il subit une modification"""
-        return self.name + (" *" if self.offset!=0 or self.start_x!=0 or self.stop_x!=0 else "")
+        return self.name + (" *" if self.offset!=0 or self.start_x!=0 or self.stop_x!=0
+                            or self.sampling != self.imported_sampling else "")
 
     def get_params(self)-> dict:
         """Récupère l'ensemble des paramètres du signal sous forme de dictionnaire clé-valeur,
@@ -151,12 +191,21 @@ class FileObject:
         """Récupère la valeur d'un paramètre à partir de sa clé."""
         return getattr(self, key)
 
+    def param_default(self, key):
+        """Valeur de réinitialisation propre au fichier (None : défaut du schéma)."""
+        return self.imported_sampling if key == "sampling" else None
+
     def set_params(self,newParams):
         """Met à jour les paramètres du signal à partir d'un groupe de paramètres."""
         '''_params = custom_struct_functions.extract_parameter_values(   self.PARAMETER_SCHEMA,
                                                                     newParams)'''
 
+        # période d'abord : décalage et troncatures s'appliquent au nouvel axe
+        if "sampling" in newParams:
+            self.set_sampling(newParams["sampling"])
         for key, value in newParams.items():
+            if key == "sampling":
+                continue
             if key == "offset":
                 self.set_offset(value)
             else:
@@ -257,7 +306,7 @@ class FileObject:
         
         # paramètres du fichier (ParameterTree) : décalage temporel et troncatures
         arg_to_export= ['file_type','import_params','address','offset','start_x','stop_x',
-                        'label']
+                        'label','sampling']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         
         return obj_params
@@ -437,8 +486,7 @@ class SignalObject:
         État des données du signal : pipeline (filtres, undo/redo) et fenêtre du fichier
         (décalage, troncatures). Sert à détecter les signaux dérivés périmés.
         """
-        window = self.file.window()
-        return (self.pipeline_version, self.file.offset, window.start, window.stop)
+        return (self.pipeline_version, *self.file.time_key())
 
     def refresh_derived(self) -> tuple[list, list]:
         """

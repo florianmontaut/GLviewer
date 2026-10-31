@@ -318,6 +318,10 @@ class ParameterController(QObject):
             # Nettoyage
             param = {k: v for k, v in param.items() if v is not None}
             param.update(spec)
+            # valeur rétablie par le bouton de réinitialisation, propre à l'objet (ex:
+            # période d'échantillonnage lue à l'import du fichier)
+            if hasattr(obj, "param_default") and obj.param_default(key) is not None:
+                param["default"] = obj.param_default(key)
             children.append(Parameter.create(**param))
 
 
