@@ -2,6 +2,7 @@
 """Thème clair / sombre (ressources/theme.py) : graphique, arbres, barre d'outils."""
 import pyqtgraph as pg
 import pytest
+from PyQt6 import QtGui
 from PyQt6.QtCore import Qt
 
 from ressources import theme
@@ -70,3 +71,59 @@ def test_dark_theme_applies_stylesheet(dark_app):
     main.App.toggle_theme(dark_app, {"dark_mode": True})
     assert main.ITEM_VIEW_QSS in dark_app.styleSheet()
     assert pg.getConfigOption("background") == theme.DARK["graph_bg"]
+
+
+# ---------------- annotations ----------------
+
+from test_annotation_history import _free_text, _curve_annotation, _annotations  # noqa: E402
+from test_text_annotations import graph  # noqa: E402,F401
+
+
+def _shown_colors(item):
+    """Couleurs du texte affiché : couleur par défaut et couleurs écrites dans son html."""
+    import re
+    html = item.textItem.toHtml()
+    colors = set(c.lower() for c in re.findall(r"color:\s*(#[0-9a-fA-F]{6})", html))
+    return colors | {item.textItem.defaultTextColor().name()}
+
+
+def test_black_annotation_readable_in_dark_mode(ctrl, graph, monkeypatch):
+    """Texte noir (par défaut) affiché clair en sombre ; le projet garde le noir."""
+    monkeypatch.setattr(theme.darkdetect, "theme", lambda: "Light")
+    item = _free_text(ctrl, graph)
+    [annotation] = _annotations(ctrl)
+    assert _shown_colors(item) == {"#000000"}
+
+    ctrl.graph_ctrl.updateOptions({"dark_mode": True})
+    assert _shown_colors(item) == {theme.DARK["text"].lower()}
+    # l'état enregistré est inchangé
+    assert item.to_annotation(annotation) == annotation
+
+    ctrl.graph_ctrl.updateOptions({"dark_mode": False})
+    assert _shown_colors(item) == {"#000000"}
+
+
+def test_black_html_readable_in_dark_mode(ctrl, graph, monkeypatch):
+    """Noir écrit dans le html par l'éditeur : affiché clair, enregistré noir."""
+    monkeypatch.setattr(theme.darkdetect, "theme", lambda: "Light")
+    _free_text(ctrl, graph)
+    [annotation] = _annotations(ctrl)
+    black = annotation.with_changes(
+                html='<p><span style=" color:#000000;">Début</span></p>')
+    ctrl.graph_ctrl.graph_tree_ctrl.show_annotation(black)
+    item = ctrl.graph_ctrl.graph_tree_ctrl.textItems[annotation.id]
+    ctrl.graph_ctrl.updateOptions({"dark_mode": True})
+    assert _shown_colors(item) == {theme.DARK["text"].lower()}
+    assert "color:#000000" in item.to_annotation(black).html
+
+
+def test_colored_annotation_kept_in_dark_mode(ctrl, graph, monkeypatch):
+    """Annotation d'une courbe : couleur de la courbe, quel que soit le thème."""
+    monkeypatch.setattr(theme.darkdetect, "theme", lambda: "Light")
+    item = _curve_annotation(ctrl, graph)
+    [annotation] = _annotations(ctrl)
+    curve_color = QtGui.QColor(annotation.color)
+    ctrl.graph_ctrl.updateOptions({"dark_mode": True})
+    assert item.lineItem.pen().color() == curve_color
+    assert item.textItem.defaultTextColor() == curve_color
+    assert item.to_annotation(annotation) == annotation

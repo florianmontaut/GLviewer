@@ -8,6 +8,7 @@ Thème de l'interface (clair / sombre), en un seul endroit :
 L'option « Dark mode » choisit le thème sombre ; sinon, le thème suit celui de Windows.
 """
 import pathlib
+import re
 
 import darkdetect
 import pyqtgraph as pg
@@ -220,6 +221,51 @@ def _retint_actions() -> None:
             continue
         alive.append((action, name))
     _themed_actions[:] = alive
+
+
+# ---------------------------------------------------------------- annotations
+# Textes du graphique : noirs par défaut. En thème sombre, ce noir (couleur du texte et
+# couleurs écrites dans son html) est affiché à la couleur de texte du thème ; le projet
+# enregistre toujours le noir, pour que l'annotation reste lisible en thème clair.
+ANNOTATION_DEFAULT = "#000000"
+
+
+def _current(dark):
+    return _dark if dark is None else dark
+
+
+def annotation_color(color, dark: bool | None = None) -> QtGui.QColor:
+    """Couleur affichée d'une annotation de couleur enregistrée color."""
+    color = QtGui.QColor(color)
+    if _current(dark) and color == QtGui.QColor(ANNOTATION_DEFAULT):
+        return QtGui.QColor(DARK["text"])
+    return color
+
+
+def stored_annotation_color(color, dark: bool | None = None) -> QtGui.QColor:
+    """Couleur enregistrée d'une annotation affichée en color (inverse d'annotation_color)."""
+    color = QtGui.QColor(color)
+    if _current(dark) and color == QtGui.QColor(DARK["text"]):
+        return QtGui.QColor(ANNOTATION_DEFAULT)
+    return color
+
+
+def _swap_html_color(html: str, old: str, new: str) -> str:
+    return re.sub(rf"color:\s*{old}(?![0-9a-f])", f"color:{new}", html, flags=re.IGNORECASE)
+
+
+def annotation_html(html: str, dark: bool | None = None) -> str:
+    """Html affiché d'une annotation (texte noir à la couleur du thème sombre)."""
+    if _current(dark):
+        return _swap_html_color(html, ANNOTATION_DEFAULT, DARK["text"])
+    return html
+
+
+def stored_annotation_html(html: str, dark: bool | None = None) -> str:
+    """Html enregistré d'une annotation affichée (inverse d'annotation_html)."""
+    if _current(dark):
+        return _swap_html_color(html, DARK["text"], ANNOTATION_DEFAULT)
+    return html
 
 
 def row_tint(pen_color) -> QtGui.QBrush:

@@ -346,6 +346,11 @@ class pgText(pg.TextItem):
         self.Onflag=False
         self.font=QtGui.QFont("Times", 8)
         self.color=pg.mkColor(kwargs.get("color",QtGui.QColor("black")))
+        # couleur enregistrée (modèle) ; self.color, celle de pg.TextItem, est la couleur
+        # affichée, selon le thème : voir display_color
+        self.annotation_color=QtGui.QColor(self.color)
+        # thème sombre imposé (changement de thème en cours) ; None : thème courant
+        self.dark=None
         self.window=None
 
         # Point exact à annoter (coordonnées des données)
@@ -411,13 +416,15 @@ class pgText(pg.TextItem):
                                            le texte a été validé)
         """
         if self.toPlainText() is not None:
-            self.window=TextDialog(text=self.toPlainText(),font=self.font,color=self.color)
+            self.window=TextDialog(text=self.toPlainText(),font=self.font,
+                                   color=self.display_color())
         else:
             self.window=TextDialog()
         self.window.show()
         #si OK est pressé dans la dialogBox, on récupère les données
         def updateText():
-            html,self.font,self.color=self.window.getText()
+            html,self.font,color=self.window.getText()
+            self.annotation_color = theme.stored_annotation_color(color, self.dark)
             self.setHtml(html)
             self.update_arrow()
             if on_done is not None:
@@ -438,10 +445,11 @@ class pgText(pg.TextItem):
         if self.anchorHandle is not None:
             anchor = (self.anchorHandle.pos().x(), self.anchorHandle.pos().y())
         return base.with_changes(
-                        html        = self.textItem.toHtml(),
+                        html        = theme.stored_annotation_html(self.textItem.toHtml(),
+                                                                   self.dark),
                         pos         = (self.pos().x(), self.pos().y()),
                         anchor_pos  = anchor,
-                        color       = QtGui.QColor(self.color).name(
+                        color       = QtGui.QColor(self.annotation_color).name(
                                                 QtGui.QColor.NameFormat.HexArgb),
                         font        = self.font.toString(),
                         )
@@ -449,12 +457,12 @@ class pgText(pg.TextItem):
     def apply_annotation(self, annotation):
         """Aligne l'affichage sur une TextAnnotation (création, undo/redo, rechargement)."""
         self.annotation_id = annotation.id
-        self.color = QtGui.QColor(annotation.color)
+        self.annotation_color = QtGui.QColor(annotation.color)
         if annotation.font:
             self.font = QtGui.QFont()
             self.font.fromString(annotation.font)
-        self.setColor(self.color)
-        self.setHtml(annotation.html)
+        self.setColor(self.display_color())
+        self.setHtml(theme.annotation_html(annotation.html, self.dark))
         self.setAnchor((0,1) if annotation.anchor_pos is not None else (0,0))
         self.setPos(QtCore.QPointF(*annotation.pos))
 
@@ -465,13 +473,18 @@ class pgText(pg.TextItem):
             else:
                 self.anchorHandle.setPos(QtCore.QPointF(*annotation.anchor_pos))
             # couleur de la flèche
-            pen = QtGui.QPen(self.color, 1)
+            color = self.display_color()
+            pen = QtGui.QPen(color, 1)
             pen.setCosmetic(True)
             self.lineItem.setPen(pen)
-            self.arrow.setStyle(pen=pg.mkPen(self.color), brush=self.color)
-            self.anchorHandle.setBrush(QtGui.QBrush(self.color))
-            self.anchorHandle.setPen(QtGui.QPen(self.color))
+            self.arrow.setStyle(pen=pg.mkPen(color), brush=color)
+            self.anchorHandle.setBrush(QtGui.QBrush(color))
+            self.anchorHandle.setPen(QtGui.QPen(color))
         self.update_arrow()
+
+    def display_color(self):
+        """Couleur affichée : celle enregistrée, ou celle du texte du thème sombre (noir)."""
+        return theme.annotation_color(self.annotation_color, self.dark)
 
     # -----------------------------------------------------
     # Création de la flèche
@@ -485,8 +498,9 @@ class pgText(pg.TextItem):
         if self.anchor_pos is None or self.lineItem is not None:
             return
 
+        color = self.display_color()
         # Ligne (pen cosmétique : épaisseur en pixels quel que soit le zoom)
-        pen = QtGui.QPen(self.color, 1)
+        pen = QtGui.QPen(color, 1)
         pen.setCosmetic(True)
         self.lineItem = QGraphicsLineItem()
         self.lineItem.setPen(pen)
@@ -497,14 +511,14 @@ class pgText(pg.TextItem):
                                     headLen=12,
                                     tipAngle=30,
                                     baseAngle=20,
-                                    pen=pg.mkPen(self.color),
-                                    brush=self.color
+                                    pen=pg.mkPen(color),
+                                    brush=color
                                 )
         self.arrow.setZValue(self.zValue() - 1)
 
         # Ancrage
         self.anchorHandle = AnchorHandle(
-                                            color=self.color,
+                                            color=color,
                                             owner=self
                                         )
 

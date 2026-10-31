@@ -345,6 +345,8 @@ class GraphController(QtCore.QObject):
         dark = theme.is_dark(self.opts.get("dark_mode", False))
         self.graph.setBackground(theme.graph_background(self.opts["background_color"], dark))
         theme.style_plot(self.plot, dark)
+        if getattr(self, "graph_tree_ctrl", None) is not None:
+            self.graph_tree_ctrl.apply_theme(dark)
 
     def start_range_selection(self, sig: SignalObject):
         """
