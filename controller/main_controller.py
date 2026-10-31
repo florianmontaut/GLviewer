@@ -1045,6 +1045,8 @@ class MainController(QtCore.QObject):
         Connecte les signaux émis par le GraphController à des slots du MainController.
         """
 
+        # voies glissées depuis un arbre sur un graphique
+        self.graph_ctrl.signals_dropped.connect(self._on_signals_dropped)
         self.graph_ctrl.curve_selected.connect(
                                                 lambda ctx:
                                                 self.select_from_context(ctx, source="graph")
@@ -1452,6 +1454,19 @@ class MainController(QtCore.QObject):
             self.model.refresh_object(sig)
         self.channel_model.rebuild()
         self._refresh_derived()
+
+    def _on_signals_dropped(self, ids, number: int):
+        """Voies glissées depuis un arbre et déposées sur le graphique n° number."""
+        by_id = {sig.id: sig for sig in self.workspace_signals()}
+        signals = [by_id[i] for i in ids if i in by_id]
+        if not signals:
+            return
+        self.set_graph_number(signals, number)
+        QtCore.QTimer.singleShot(0, self._update_title)
+        # « Graph » affiché dans le ParameterTree à jour
+        ctx = self.param_ctrl._ctx
+        if ctx is not None and ctx.signal is not None:
+            QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
 
     def set_graph_number(self, signals, number: int):
         """Voies tracées dans le graphique n° number (la dernière affectation l'emporte)."""

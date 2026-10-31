@@ -438,3 +438,101 @@ def test_alignment_markers_in_active_panel(ctrl, files):
     assert all(item.getViewBox() is second.vb for item in align._items)
     align.cancel()
     assert all(item.scene() is None for item in [align.handle, align.point_a, align.point_b])
+
+
+# ---------------- glisser-déposer depuis les arbres ----------------
+
+def _mime_ids(data):
+    from model.base_objects import GRAPH_SIGNALS_MIME
+    return bytes(data.data(GRAPH_SIGNALS_MIME)).decode().split(",")
+
+
+def test_file_tree_drag_carries_signals(ctrl, files):
+    model = ctrl.model
+    sig_index = model.index_from_item(model.find_item(model.root, files[0].signals[1]))
+    file_index = model.index_from_item(model.find_item(model.root, files[1]))
+    assert model.flags(sig_index) & QtCore.Qt.ItemFlag.ItemIsDragEnabled
+    assert model.flags(file_index) & QtCore.Qt.ItemFlag.ItemIsDragEnabled
+    assert _mime_ids(model.mimeData([sig_index])) == [files[0].signals[1].id]
+    assert _mime_ids(model.mimeData([file_index])) == [s.id for s in files[1].signals]
+    assert ctrl.view.treefile.dragEnabled()
+
+
+def test_channel_tree_drag_carries_signals(ctrl, files, monkeypatch):
+    monkeypatch.setattr(ctrl, "_ask_group_name", lambda title, default: "Sinus")
+    key = next(g.key for g in ctrl.channel_model.groups() if g.name == "CH2")
+    ctrl.edit_channel_groups("new", [key])
+    model = ctrl.channel_model
+    group_index = model.index(0, 0)                 # groupe « Sinus » en tête
+    assert model.index(0, 0).internalPointer().obj.name == "Sinus"
+    assert model.flags(group_index) & QtCore.Qt.ItemFlag.ItemIsDragEnabled
+    assert sorted(_mime_ids(model.mimeData([group_index]))) == \
+           sorted(f.signals[1].id for f in files)
+    channel_index = model.index(1, 0)               # voie logique CH1
+    data = model.mimeData([channel_index])
+    assert sorted(_mime_ids(data)) == sorted(f.signals[0].id for f in files)
+    assert data.hasFormat(model.CHANNEL_MIME_TYPE)  # glisser dans l'arbre inchangé
+    # un groupe ne se dépose pas dans l'arbre
+    assert not model.canDropMimeData(model.mimeData([group_index]),
+                                     QtCore.Qt.DropAction.LinkAction, -1, -1, channel_index)
+
+
+def _drop(ctrl, qapp, signals, scene_pos, kind="Drop"):
+    from PyQt6 import QtGui
+    from model.base_objects import graph_signals_mime
+    view = ctrl.graph_ctrl.graph
+    pos = view.mapFromScene(scene_pos)
+    data = graph_signals_mime(signals)
+    # Qt ignore un déplacement ou un dépôt sans entrée préalable (comme un vrai glisser)
+    enter = QtGui.QDragEnterEvent(pos, QtCore.Qt.DropAction.LinkAction, data,
+                                  QtCore.Qt.MouseButton.LeftButton,
+                                  QtCore.Qt.KeyboardModifier.NoModifier)
+    qapp.sendEvent(view.viewport(), enter)
+    if kind == "Drop":
+        cls, pos = QtGui.QDropEvent, QtCore.QPointF(pos)
+    else:
+        cls = QtGui.QDragMoveEvent
+    event = cls(pos, QtCore.Qt.DropAction.LinkAction, data, QtCore.Qt.MouseButton.LeftButton,
+                QtCore.Qt.KeyboardModifier.NoModifier)
+    qapp.sendEvent(view.viewport(), event)
+    qapp.processEvents()
+    return event
+
+
+def test_drop_on_graph_and_below_last(ctrl, files, qapp):
+    graph = ctrl.graph_ctrl
+    ctrl.view.resize(1400, 900)
+    ctrl.view.show()
+    qapp.processEvents()
+    _set_graph(ctrl, files[0].signals[0], 2)
+    qapp.processEvents()
+
+    # sous le dernier graphique : nouveau graphique (3)
+    last = graph.panels[-1].plot.sceneBoundingRect()
+    below = QtCore.QPointF(last.center().x(), last.bottom() + 5)
+    assert graph.graph_number_at(below) == 3
+    move = _drop(ctrl, qapp, files[1].signals, below, kind="Move")
+    assert move.isAccepted() and graph._drop_frame.isVisible()
+    event = _drop(ctrl, qapp, files[1].signals, below)
+    assert event.isAccepted()
+    assert [s.graph_number for s in files[1].signals] == [3, 3]
+    assert len(graph.panels) == 3 and not graph._drop_frame.isVisible()
+
+    # sur le graphique 1 (axe compris)
+    qapp.processEvents()
+    first = graph.main_panel.plot.sceneBoundingRect()
+    _drop(ctrl, qapp, [files[1].signals[0]], QtCore.QPointF(first.left() + 5, first.center().y()))
+    assert files[1].signals[0].graph_number == 1
+    assert graph.panel_of(files[1].signals[0]) is graph.main_panel
+
+
+def test_drop_ignores_other_data(ctrl, files, qapp):
+    from PyQt6 import QtGui
+    view = ctrl.graph_ctrl.graph
+    data = QtCore.QMimeData()
+    data.setText("texte")
+    event = QtGui.QDropEvent(QtCore.QPointF(50, 50), QtCore.Qt.DropAction.LinkAction, data,
+                             QtCore.Qt.MouseButton.LeftButton,
+                             QtCore.Qt.KeyboardModifier.NoModifier)
+    qapp.sendEvent(view.viewport(), event)
+    assert all(s.graph_number == 1 for f in files for s in f.signals)

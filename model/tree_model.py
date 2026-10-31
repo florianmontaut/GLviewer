@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel
 from PyQt6.QtGui import QBrush,QFont
 from model.tree_item import TreeItem
 from model.benchmark import power_text
-from model.base_objects import FileObject, SignalObject,Workspace
+from model.base_objects import FileObject, SignalObject,Workspace, graph_signals_mime,                               GRAPH_SIGNALS_MIME
 from model.filters.base_filter import FilterNode
 from model.analysis.base_analysis import AnalysisNode
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -410,8 +410,27 @@ class PipelineTreeModel(QAbstractItemModel):
 
         if isinstance(obj, SignalObject) or obj.item_type == itemType.FILE:
             flags |= Qt.ItemFlag.ItemIsUserCheckable
+        # voie ou fichier glissé sur un graphique (paramètre « Graph » de ses voies)
+        if ((isinstance(obj, SignalObject) and obj.item_type != itemType.DERIVED)
+                or obj.item_type == itemType.FILE):
+            flags |= Qt.ItemFlag.ItemIsDragEnabled
 
         return flags
+
+    # ---------------- glisser vers un graphique ----------------
+
+    def supportedDragActions(self):
+        return Qt.DropAction.LinkAction
+
+    def mimeTypes(self):
+        return [GRAPH_SIGNALS_MIME]
+
+    def mimeData(self, indexes):
+        signals = []
+        for index in indexes:
+            obj = index.internalPointer().obj
+            signals += obj.signals if obj.item_type == itemType.FILE else [obj]
+        return graph_signals_mime(signals)
 
 
     # ---------------------- Update pipeline (undo/redo) ----------------------

@@ -25,6 +25,18 @@ import uuid
 
 # nombre maximal de graphiques empilés (paramètre « Graph » des voies)
 MAX_GRAPHS = 8
+# glisser-déposer d'un arbre vers un graphique : id des voies glissées, séparés par « , »
+GRAPH_SIGNALS_MIME = "application/x-glviewer-graph-signals"
+
+
+def graph_signals_mime(signals, data=None):
+    """QMimeData (data, ou un nouveau) portant les voies à déposer sur un graphique."""
+    from PyQt6.QtCore import QMimeData
+    data = data if data is not None else QMimeData()
+    ids = list(dict.fromkeys(sig.id for sig in signals))
+    if ids:
+        data.setData(GRAPH_SIGNALS_MIME, ",".join(ids).encode())
+    return data
 
 # paramètre « Graph » d'un fichier ou d'un groupe de voies : appliqué à toutes ses voies
 GROUP_GRAPH_PARAM = {

@@ -5,7 +5,8 @@ import numpy as np
 from PyQt6 import QtCore,QtGui,QtWidgets
 import pyqtgraph as pg
 import pyqtgraph.parametertree as ptree
-from model.base_objects import SignalObject,DerivedSignalObject
+from model.base_objects import (SignalObject, DerivedSignalObject, MAX_GRAPHS,
+                                GRAPH_SIGNALS_MIME)
 from model.missing_data import display_values
 from ressources import custom_graph_functions,custom_types,custom_items,custom_menu,theme
 
@@ -114,6 +115,43 @@ class RangePicker(QtCore.QObject):
             QtCore.QTimer.singleShot(0, self.accept)
 
 
+class GraphDropTarget(QtCore.QObject):
+    """
+    Dépôt sur le graphique de voies glissées depuis un arbre (GRAPH_SIGNALS_MIME) :
+    numéro du graphique visé, ou nouveau graphique sous le dernier.
+    """
+
+    def __init__(self, graph_ctrl):
+        super().__init__(graph_ctrl)
+        self.graph_ctrl = graph_ctrl
+        view = graph_ctrl.graph
+        view.setAcceptDrops(True)
+        view.viewport().setAcceptDrops(True)
+        view.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        kind = event.type()
+        if kind not in (QtCore.QEvent.Type.DragEnter, QtCore.QEvent.Type.DragMove,
+                        QtCore.QEvent.Type.Drop, QtCore.QEvent.Type.DragLeave):
+            return False
+        if kind == QtCore.QEvent.Type.DragLeave:
+            self.graph_ctrl.show_drop_target(None)
+            return False
+        if not event.mimeData().hasFormat(GRAPH_SIGNALS_MIME):
+            return False
+        number = self.graph_ctrl.graph_number_at(
+                        self.graph_ctrl.graph.mapToScene(event.position().toPoint()))
+        if kind == QtCore.QEvent.Type.Drop:
+            self.graph_ctrl.show_drop_target(None)
+            ids = bytes(event.mimeData().data(GRAPH_SIGNALS_MIME)).decode().split(",")
+            self.graph_ctrl.signals_dropped.emit(ids, number)
+        else:
+            self.graph_ctrl.show_drop_target(number)
+        event.setDropAction(QtCore.Qt.DropAction.LinkAction)
+        event.accept()
+        return True
+
+
 class GraphController(QtCore.QObject):
     """
     Gère l'affichage PyQtGraph :
@@ -132,6 +170,8 @@ class GraphController(QtCore.QObject):
     curve_selected          = QtCore.pyqtSignal(custom_items.SelectionContext)
     reference_requested     = QtCore.pyqtSignal(SignalObject)
     cursor_moved_X          = QtCore.pyqtSignal(float)
+    # voies (id) déposées sur le graphique n° (glisser-déposer depuis un arbre)
+    signals_dropped         = QtCore.pyqtSignal(list, int)
     # case « snap to selected signal » du curseur souris (outils graphiques)
     snap_toggled            = QtCore.pyqtSignal(bool)
     menu_actions_triggered  = QtCore.pyqtSignal(    custom_types.ActionModifier,
@@ -192,6 +232,9 @@ class GraphController(QtCore.QObject):
         # du menu contextuel (ex: ajout de texte)
         self._context_scene_pos = None
         self.plot.scene().sigMouseClicked.connect(self._remember_context_click)
+        # voies glissées depuis un arbre
+        self._drop_frame = None
+        self.drop_target = GraphDropTarget(self)
 
     # option « Missing data > Display » (Options > Graph settings)
     MISSING_GAP = "Gap in the curve"
@@ -321,6 +364,42 @@ class GraphController(QtCore.QObject):
             number = self.graph_number(sig)
             panel = self.panels[number - 1] if number <= len(self.panels) else self.main_panel
         return panel.plot
+
+    def graph_number_at(self, scene_pos) -> int:
+        """
+        Graphique visé par un dépôt : celui sous le point (axes compris) ; sous le dernier
+        graphique, un nouveau (dans la limite de MAX_GRAPHS).
+        """
+        for number, panel in enumerate(self.panels, start=1):
+            if panel.plot.sceneBoundingRect().contains(scene_pos):
+                return number
+        last = self.panels[-1].plot.sceneBoundingRect()
+        if scene_pos.y() > last.bottom():
+            return min(len(self.panels) + 1, MAX_GRAPHS)
+        return 1 if scene_pos.y() < self.main_panel.plot.sceneBoundingRect().top()                else len(self.panels)
+
+    def show_drop_target(self, number: int | None):
+        """Cadre sur le graphique visé pendant un glisser (None : retiré)."""
+        scene = self.graph.scene()
+        if self._drop_frame is None:
+            color = QtGui.QColor(theme.colors()["accent"])
+            self._drop_frame = QtWidgets.QGraphicsRectItem()
+            self._drop_frame.setPen(pg.mkPen(color, width=2, style=QtCore.Qt.PenStyle.DashLine))
+            color.setAlpha(30)
+            self._drop_frame.setBrush(color)
+            self._drop_frame.setZValue(1e6)
+            scene.addItem(self._drop_frame)
+        if number is None:
+            self._drop_frame.hide()
+            return
+        if number <= len(self.panels):
+            rect = self.panels[number - 1].plot.sceneBoundingRect()
+        else:
+            # nouveau graphique : bande sous le dernier
+            last = self.panels[-1].plot.sceneBoundingRect()
+            rect = QtCore.QRectF(last.left(), last.bottom() - 30, last.width(), 30)
+        self._drop_frame.setRect(rect)
+        self._drop_frame.show()
 
     def number_of_panel(self, panel) -> int:
         return self.panels.index(panel) + 1 if panel in self.panels else 1

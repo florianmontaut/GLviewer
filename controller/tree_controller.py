@@ -36,6 +36,10 @@ class TreeController(QtCore.QObject):
         self.macro_recording=False
         self.reference_sig = None
         #self.tree.header().hide()
+        # voie ou fichier glissé sur un graphique (pas de dépôt dans cet arbre)
+        self.tree.setDragEnabled(True)
+        self.tree.setDragDropMode(QtWidgets.QAbstractItemView.DragDropMode.DragOnly)
+        self.tree.setDefaultDropAction(QtCore.Qt.DropAction.LinkAction)
         self._init_tree_menu()
         # touche Suppr dans l'arbre : comme « Delete selection »
         self.delete_shortcut = QtGui.QShortcut(QtGui.QKeySequence.StandardKey.Delete, self.tree)

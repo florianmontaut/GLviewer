@@ -32,6 +32,8 @@ class ParameterController(QObject):
         # tracé du panneau d'un signal (graphiques empilés), remplacé par le MainController
         self.plot_of = lambda signal: self.graph
         self.param = None
+        self._ctx = None
+        self._signal = None
         # connexion du ParameterTree affiché (déconnectée à chaque reconstruction afin
         # que l'ancien arbre ne puisse plus émettre avec un SelectionContext périmé)
         self._tree_slot = None
@@ -107,6 +109,8 @@ class ParameterController(QObject):
             available_signals=[]
 
         self._clear_param_tree()
+        # contexte affiché (rechargé après un changement extérieur, ex: glisser-déposer)
+        self._ctx = ctx
         # signal du contexte : conversion des valeurs affichées (ex: plage d'un modèle)
         self._signal = sig
         x = getattr(sig, 'x', None)
@@ -132,6 +136,7 @@ class ParameterController(QObject):
         self._clear_param_tree()
         self.param = None
         self._signal = None
+        self._ctx = None
         self.widget.clear()
 
     def shows(self, file_obj) -> bool:

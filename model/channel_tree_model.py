@@ -12,6 +12,7 @@ from PyQt6.QtGui import QFont
 
 from model.tree_item import TreeItem
 from model.channels import build_channel_tree
+from model.base_objects import graph_signals_mime, GRAPH_SIGNALS_MIME
 from ressources.custom_types import itemType
 from ressources import theme
 
@@ -108,8 +109,9 @@ class ChannelTreeModel(QAbstractItemModel):
         # une voie d'un fichier se glisse sur une voie logique (ou l'une de ses voies),
         # une voie logique sur un groupe
         flags |= Qt.ItemFlag.ItemIsDropEnabled
-        if index.internalPointer().obj.item_type != itemType.CHANNEL_GROUP:
-            flags |= Qt.ItemFlag.ItemIsDragEnabled
+        # tout se glisse sur un graphique ; un groupe ne se glisse pas dans l'arbre
+        # (canDropMimeData : ni voie, ni voie logique)
+        flags |= Qt.ItemFlag.ItemIsDragEnabled
         return flags
 
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
@@ -207,7 +209,7 @@ class ChannelTreeModel(QAbstractItemModel):
         return Qt.DropAction.LinkAction
 
     def mimeTypes(self):
-        return [self.MIME_TYPE, self.CHANNEL_MIME_TYPE]
+        return [self.MIME_TYPE, self.CHANNEL_MIME_TYPE, GRAPH_SIGNALS_MIME]
 
     def mimeData(self, indexes):
         objs = [index.internalPointer().obj for index in indexes]
@@ -218,7 +220,10 @@ class ChannelTreeModel(QAbstractItemModel):
         keys = [obj.key for obj in dict.fromkeys(objs) if obj.item_type == itemType.CHANNEL]
         if keys:
             data.setData(self.CHANNEL_MIME_TYPE, "\n".join(keys).encode())
-        return data
+        # voies de la sélection, pour un dépôt sur un graphique
+        signals = [sig for obj in objs
+                   for sig in (obj.signals if obj.item_type in CONTAINERS else [obj])]
+        return graph_signals_mime(signals, data)
 
     def _drop_target(self, parent):
         """Voie logique visée par un dépôt (sur elle ou sur l'une de ses voies)."""
