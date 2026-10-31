@@ -849,6 +849,7 @@ class MainController(QtCore.QObject):
             self.graph_ctrl.update_signal(sig)
             if self.model is not None:
                 self.model.refresh_object(sig)
+                self.model.refresh_check_state(sig.file)
 
     def _on_visibility_changed(self, item, index=None):
         """
