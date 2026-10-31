@@ -378,3 +378,63 @@ def test_group_graph_number_applies_to_its_channels(ctrl, files, monkeypatch):
     # puis le fichier A dans le graphique 1 : sa voie CH2 quitte le graphique 2
     _set_container_graph(ctrl, files[0], itemType.FILE, 1)
     assert files[0].signals[1].graph_number == 1 and files[1].signals[1].graph_number == 2
+
+
+# ---------------- graphique actif : celui du dernier signal sélectionné ----------------
+
+def _select(ctrl, sig):
+    from ressources.custom_items import SelectionContext, itemType
+    ctrl.select_from_context(SelectionContext(role=itemType.RAW, signal=sig), source="tree")
+
+
+def test_active_panel_follows_selected_signal(ctrl, files):
+    graph = ctrl.graph_ctrl
+    tools = graph.graph_tree_ctrl
+    tools.cursors_V.param('show cursors').setValue(True)
+    _set_graph(ctrl, files[1].signals[1], 2)
+    assert graph.active_panel is graph.main_panel
+
+    _select(ctrl, files[1].signals[1])
+    second = graph.panels[1]
+    assert graph.active_panel is second
+    assert tools.cursors_V.graph is second.plot and tools.cursors_H.graph is second.plot
+    assert all(c.getViewBox() is second.vb for c in tools.cursors_V.cursors)
+
+    # fichier sélectionné (pas de courbe) : le graphique actif ne change pas
+    from ressources.custom_items import SelectionContext, itemType
+    ctrl.select_from_context(SelectionContext(role=itemType.FILE, signal=files[0]),
+                             source="tree")
+    assert graph.active_panel is second
+
+    _select(ctrl, files[0].signals[0])
+    assert graph.active_panel is graph.main_panel
+    assert all(c.getViewBox() is graph.main_panel.vb for c in tools.cursors_V.cursors)
+
+
+def test_selected_curve_moved_takes_tools_along(ctrl, files):
+    graph = ctrl.graph_ctrl
+    sig = files[0].signals[0]
+    _select(ctrl, sig)
+    _set_graph(ctrl, sig, 2)
+    assert graph.active_panel is graph.panels[1]
+    assert graph.graph_tree_ctrl.cursors_V.graph is graph.panels[1].plot
+    # graphique retiré : outils ramenés dans le graphique principal
+    _set_graph(ctrl, sig, 1)
+    assert len(graph.panels) == 1
+    assert graph.graph_tree_ctrl.cursors_V.graph is graph.plot
+
+
+def test_alignment_markers_in_active_panel(ctrl, files):
+    from ressources.custom_types import qSignalType as T, ActionModifier as M
+    graph = ctrl.graph_ctrl
+    _set_graph(ctrl, files[1].signals[1], 2)
+    _select(ctrl, files[1].signals[1])
+    item = ctrl.model.find_item(ctrl.model.root, files[1])
+    ctrl.view.treefile.setCurrentIndex(ctrl.model.index_from_item(item))
+    ctrl._action_concentrator(M.ADD_ACTION, T.ALIGN)
+    align = ctrl.alignment_ctrl
+    assert align.active
+    second = graph.panels[1]
+    assert all(item.getViewBox() is second.vb for item in align._items)
+    align.cancel()
+    assert all(item.scene() is None for item in [align.handle, align.point_a, align.point_b])

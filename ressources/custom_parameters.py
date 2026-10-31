@@ -218,6 +218,17 @@ class LinkedCursors(pTypes.GroupParameter):
         return sorted([ float(self.param('cursor 1').value()),
                         float(self.param('cursor 2').value())])
 
+    def set_graph(self, graph):
+        """Curseurs déplacés dans un autre tracé (graphiques empilés), affichés ou non."""
+        if graph is self.graph:
+            return
+        shown = [cursor for cursor in self.cursors if cursor.scene() is not None]
+        for cursor in shown:
+            self.graph.removeItem(cursor)
+        self.graph = graph
+        for cursor in shown:
+            self.graph.addItem(cursor, ignoreBounds=True)
+
     def remove_from_graph(self):
         """Retire les curseurs du graphique (ex: ParameterTree reconstruit)."""
         for cursor in self.cursors:

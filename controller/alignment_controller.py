@@ -130,7 +130,9 @@ class AlignmentController(QtCore.QObject):
         self.file = file_obj
         self.delta = 0.0
         self._a = None                       # instant A en temps du fichier (avant écart)
-        (x0, x1), _ = self.graph.vb.viewRange()
+        # repères dans le graphique actif (celui du dernier signal sélectionné)
+        self._plot = self.graph.active_panel.plot
+        (x0, x1), _ = self._plot.vb.viewRange()
         span = x1 - x0
         self._preview = {}
         for sig, curve in self.graph.curves.items():
@@ -157,7 +159,7 @@ class AlignmentController(QtCore.QObject):
                                        "color": (40, 170, 60)})
         self._items = [self.handle, self.point_a, self.point_b]
         for item in self._items:
-            self.graph.plot.addItem(item, ignoreBounds=True)
+            self._plot.addItem(item, ignoreBounds=True)
 
         self.panel = AlignmentPanel(file_obj.label or file_obj.name)
         self.panel.offset.valueChanged.connect(self.set_delta)
@@ -198,7 +200,7 @@ class AlignmentController(QtCore.QObject):
         self._redraw_timer.stop()
         self._preview = {}
         for item in self._items:
-            self.graph.plot.removeItem(item)
+            self._plot.removeItem(item)
         self._items = []
         for curve in self.graph.curves.values():
             curve.setOpacity(1.0)

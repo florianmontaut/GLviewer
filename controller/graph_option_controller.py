@@ -211,6 +211,11 @@ class GraphTreeController(QtCore.QObject):
                                 )
 
 
+    def set_graph(self, plot):
+        """Curseurs horizontaux et verticaux déplacés dans un autre graphique empilé."""
+        self.cursors_H.set_graph(plot)
+        self.cursors_V.set_graph(plot)
+
     def plot_for_graph(self, number):
         """Tracé du graphique n° number (remplacé par le GraphController)."""
         return self.graphPlot

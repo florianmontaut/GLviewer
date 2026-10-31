@@ -143,6 +143,9 @@ class GraphController(QtCore.QObject):
         self.graph = graph_widget
         self.graph_tree = graphtree
         self.panels = []  # PlotPanel ; le premier est le panneau principal
+        # graphique actif : celui du dernier signal sélectionné (outils graphiques,
+        # recalage dans le temps)
+        self._active_panel = None
 
         self.old_highlight          = None
         self.reference_sig          = None
@@ -263,9 +266,32 @@ class GraphController(QtCore.QObject):
         if self.range_picker.is_active and self.range_picker.plot is panel.plot:
             self.range_picker.cancel()
         self.panels.remove(panel)
+        if self._active_panel is panel:
+            self._active_panel = None
+        self.graph_tree_ctrl.set_graph(self.active_panel.plot)
         panel.dispose()
         self.graph.removeItem(panel.plot)
         self._layout_panels()
+
+    @property
+    def active_panel(self) -> PlotPanel:
+        """Graphique du dernier signal sélectionné (le principal par défaut)."""
+        if self._active_panel not in self.panels:
+            self._active_panel = self.main_panel
+        return self._active_panel
+
+    def _sync_active_panel(self):
+        """
+        Graphique actif = celui de la courbe sélectionnée (s'il y en a une ; sinon le
+        dernier) : les curseurs des outils graphiques y sont déplacés.
+        """
+        sig = self.old_highlight
+        panel = self.panel_of(sig) if sig is not None else None
+        if panel is not None:
+            self._active_panel = panel
+        tools = getattr(self, "graph_tree_ctrl", None)
+        if tools is not None:
+            tools.set_graph(self.active_panel.plot)
 
     def _layout_panels(self):
         """Titre de l'axe des temps sous le dernier panneau seulement."""
@@ -451,6 +477,8 @@ class GraphController(QtCore.QObject):
                 self._move_curve(moved, target)
             panel = target
             self.trim_panels()
+            if sig is self.old_highlight:
+                self._sync_active_panel()
         panel.redraw(sig)
         # la courbe sélectionnée reste mise en évidence
         self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
@@ -495,6 +523,7 @@ class GraphController(QtCore.QObject):
         self.on_selection_changed(sig)
         self._apply_curve_pen(sig, highlighted=True)
         self.old_highlight = sig
+        self._sync_active_panel()
 
     def _apply_curve_pen(self, sig, highlighted: bool):
         """Applique sig.pen à sa courbe, avec une largeur doublée si highlighted."""
