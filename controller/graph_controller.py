@@ -11,81 +11,9 @@ from ressources import custom_graph_functions,custom_types,custom_items,custom_m
 
 from controller.graph_context_menu_controller import GraphContextMenu
 from controller.graph_option_controller import GraphTreeController
-
-class RelativeTimeAxis(pg.DateAxisItem):
-    #? faire de même pour l'axe Y ?
-    def tickStrings(self, values, scale, spacing):
-        labels = []
-        for v in values:
-            if spacing < 1:
-                labels.append(f"{v*1000:.0f} ms")
-            elif spacing < 60:
-                labels.append(f"{v:.2f} s")
-            elif spacing < 3600:
-                labels.append(f"{v/60:.1f} min")
-            elif spacing < 3600*24:
-                labels.append(f"{v/3600:.1f} h")
-            else:
-                labels.append(f"{v/(3600*24):.1f} day")
-        return labels
-
-
-class SignalCurveItem(pg.PlotDataItem):
-    """
-    Courbe d'un signal. Avec clipToView, pyqtgraph ne dessine que la partie visible de
-    la courbe, mais calcule aussi son étendue (mise à l'échelle automatique : chargement,
-    « View all », bouton A) sur cette seule partie : la vue restait zoomée. L'étendue est
-    ici calculée sur le jeu de données complet.
-    """
-
-    def dataBounds(self, ax, frac=1.0, orthoRange=None):
-        if not self.curve.isVisible() or self._dataset is None:
-            return super().dataBounds(ax, frac, orthoRange)
-        if frac >= 1.0 and orthoRange is None:
-            rect = self.dataRect()              # mis en cache par pyqtgraph
-            if rect is None:
-                return [None, None]
-            return ([rect.left(), rect.right()] if ax == 0
-                    else [rect.top(), rect.bottom()])
-
-        x, y = self._dataset.x, self._dataset.y
-        values, other = (x, y) if ax == 0 else (y, x)
-        if orthoRange is not None:
-            values = values[(other >= orthoRange[0]) & (other <= orthoRange[1])]
-        values = values[np.isfinite(values)]
-        if values.size == 0:
-            return [None, None]
-        if frac >= 1.0:
-            return [float(values.min()), float(values.max())]
-        low, high = np.percentile(values, [50 * (1 - frac), 50 * (1 + frac)])
-        return [float(low), float(high)]
-
-
-class AdaptiveAxisItem(pg.AxisItem):
-    """
-    Axe dont l'espacement des graduations choisi par l'utilisateur (setTickSpacing,
-    ex: 10 °C / 2 °C) n'est appliqué que s'il donne un nombre raisonnable de graduations
-    à l'écran ; au-delà (fort dézoom), pyqtgraph choisit un espacement adapté.
-    Un espacement fixe sur une plage immense faisait calculer des millions de graduations
-    (allocation de plusieurs Tio, application figée).
-    """
-    # nombre maximal de graduations principales affichées avec l'espacement utilisateur
-    MAX_TICKS = 50
-
-    def tickSpacing(self, minVal, maxVal, size):
-        levels = self._tickSpacing
-        if levels is not None:
-            major = levels[0][0]
-            if major > 0 and (maxVal - minVal) / major <= self.MAX_TICKS:
-                return levels
-            # espacement automatique de pyqtgraph
-            self._tickSpacing = None
-            try:
-                return super().tickSpacing(minVal, maxVal, size)
-            finally:
-                self._tickSpacing = levels
-        return super().tickSpacing(minVal, maxVal, size)
-
+# axes et courbe : controller.plot_panel (noms conservés ici pour les imports existants)
+from controller.plot_panel import (PlotPanel, RelativeTimeAxis, SignalCurveItem,
+                                   AdaptiveAxisItem)
 
 class RangePicker(QtCore.QObject):
     """
@@ -189,6 +117,10 @@ class GraphController(QtCore.QObject):
     - update visibilité
     - update style
     - update pipeline (sig.y recalcule automatiquement)
+
+    Le graphique est fait de panneaux (controller.plot_panel.PlotPanel : un tracé, ses
+    axes et ses courbes). Un seul panneau pour l'instant : plot, vb et curves sont ceux
+    du panneau principal.
     """
 
     curve_selected          = QtCore.pyqtSignal(custom_items.SelectionContext)
@@ -204,15 +136,12 @@ class GraphController(QtCore.QObject):
         super().__init__()
         self.graph = graph_widget
         self.graph_tree = graphtree
-        self.time_axis = RelativeTimeAxis(orientation='bottom')
-        self.curves = {}  # SignalObject → PlotDataItem
+        self.panels = []  # PlotPanel ; le premier est le panneau principal
 
         self.old_highlight          = None
         self.reference_sig          = None
         self.macro_recording        = False
         self.vcursor                = None
-        self.xp_axis                = None
-        self.yp_axis                = None
         self._mouse_pos             = QtCore.QPointF(0,0)
 
         # options par défaut de l'objet, le premier init est réalisé
@@ -280,71 +209,77 @@ class GraphController(QtCore.QObject):
             self.opts.update(opts)
         if self.missing_placeholder != missing_before:
             # affichage des données manquantes modifié : toutes les courbes redessinées
-            for sig, curve in self.curves.items():
-                curve.setData(sig.x, self._display_y(sig))
+            for panel in self.panels:
+                for sig in panel.curves:
+                    panel.redraw(sig)
             self.update_vbox()
 
-        if self.opts["downsample"]:
-            self.plot.setDownsampling(mode=self.opts["downsample_type"],
-                                            ds=self.opts["downsample_ratio"])
-
-        if self.xp_axis is None:
-            self.xp_axis = self.plot.getAxis('bottom')
-
-        self.xp_axis.setLabel(text = self.opts["X_title"], units = self.opts["X_unit"])
-        xticks = [self.opts["X_major_t"], self.opts["X_minor_t"]]
-        self.xp_axis.setTickSpacing(xticks[0],xticks[1])
-
-        if self.yp_axis is None:
-            self.yp_axis = self.plot.getAxis('left')
-
-        self.yp_axis.setLabel(text=self.opts["Y_title"], units = self.opts["Y_unit"])
-        yticks = [self.opts["Y_major_t"],self.opts["Y_minor_t"]]
-        self.yp_axis.setTickSpacing(yticks[0], yticks[1])
+        for panel in self.panels:
+            panel.apply_options(self.opts)
         self._apply_theme()
-        self.plot.showGrid(x = self.opts["X_grid"], y = self.opts["Y_grid"],alpha = 0.4)
         # options complètes (opts peut n'en contenir qu'une partie)
         self.graph_tree_ctrl.update_settings(self.opts)
 
 
     def _init_graph(self):
-
-        self.plot = pg.PlotItem(None,axisItems={"bottom"   : self.time_axis,
-                                                "left"     : AdaptiveAxisItem('left')})
-        self.graph.addItem(self.plot)
-        # seuls les points visibles (plus une marge) sont décimés et dessinés : sans cela,
-        # zoomer réduit la décimation sur TOUTE la courbe (1 million de points redessinés
-        # pour un fichier .txt de NTC enregistré à 1 Hz)
-        self.plot.setClipToView(True)
-        if self.opts["downsample"]:
-            self.plot.setDownsampling(mode=self.opts["downsample_type"],
-                                            ds=self.opts["downsample_ratio"])
-        #if self.xp_axis is None:
-            self.xp_axis = self.plot.getAxis('bottom')
-        #self.xp_axis.setLabel(text = self.opts["X_title"], units = self.opts["X_unit"])
-        #xticks = [self.opts["X_major_t"], self.opts["X_minor_t"]]
-        #self.xp_axis.setTickSpacing(xticks[0],xticks[1])
-        #self.xp_axis.enableAutoSIPrefix(False)
-        if self.yp_axis is None:
-            self.yp_axis = self.plot.getAxis('left')
-        self.yp_axis.setLabel(text=self.opts["Y_title"], units = self.opts["Y_unit"])
-        yticks = [self.opts["Y_major_t"],self.opts["Y_minor_t"]]
-        #self.yp_axis.setTickSpacing(yticks[0], yticks[1])
-
-        self.yp_axis.enableAutoSIPrefix(False)
-        self.plot.setMouseEnabled(x = True, y = True)
-        self._apply_theme()
-        self.plot.showGrid(x = self.opts["X_grid"], y = self.opts["Y_grid"],alpha = 0.4)
+        self.add_panel()
         self.legend = pg.LegendItem((80,60), offset = (70,20),colCount = 2,verSpacing = -5)
-        self.vb = self.plot.vb
-        self.plot.plot()
-        self.vb.autoRange()
+
+    def add_panel(self) -> PlotPanel:
+        """Nouveau panneau de graphique, sous les précédents."""
+        panel = PlotPanel(self._display_y, self.opts)
+        self.graph.addItem(panel.plot, row=len(self.panels), col=0)
+        self.panels.append(panel)
+        self._apply_theme()
+        return panel
+
+    # ---------------- panneau principal (compatibilité : un seul panneau) ----------------
+
+    @property
+    def main_panel(self) -> PlotPanel:
+        return self.panels[0]
+
+    @property
+    def plot(self) -> pg.PlotItem:
+        return self.main_panel.plot
+
+    @property
+    def vb(self) -> pg.ViewBox:
+        return self.main_panel.vb
+
+    @property
+    def time_axis(self):
+        return self.main_panel.time_axis
+
+    @property
+    def xp_axis(self):
+        return self.main_panel.xp_axis
+
+    @property
+    def yp_axis(self):
+        return self.main_panel.yp_axis
+
+    @property
+    def curves(self) -> dict:
+        """Courbes de tous les panneaux : signal -> courbe."""
+        if len(self.panels) == 1:
+            return self.main_panel.curves
+        return {sig: curve for panel in self.panels for sig, curve in panel.curves.items()}
+
+    def panel_of(self, sig) -> PlotPanel | None:
+        """Panneau où la courbe de sig est tracée."""
+        return next((panel for panel in self.panels if sig in panel.curves), None)
+
+    def panel_at(self, scene_pos) -> PlotPanel | None:
+        """Panneau sous un point de l'écran (coordonnées de la scène)."""
+        return next((panel for panel in self.panels if panel.contains(scene_pos)), None)
 
     def _apply_theme(self):
         """Fond (option « Graph Background color » ou celui du thème), axes et textes."""
         dark = theme.is_dark(self.opts.get("dark_mode", False))
         self.graph.setBackground(theme.graph_background(self.opts["background_color"], dark))
-        theme.style_plot(self.plot, dark)
+        for panel in self.panels:
+            panel.apply_theme(dark)
         if getattr(self, "graph_tree_ctrl", None) is not None:
             self.graph_tree_ctrl.apply_theme(dark)
 
@@ -355,7 +290,7 @@ class GraphController(QtCore.QObject):
         """
         x = sig.x
         data_min, data_max = float(x[0]), float(x[-1])
-        view_min, view_max = self.vb.viewRange()[0]
+        view_min, view_max = (self.panel_of(sig) or self.main_panel).vb.viewRange()[0]
         low, high = max(view_min, data_min), min(view_max, data_max)
         if high <= low:
             # signal hors de la vue : on se cale sur l'ensemble du signal
@@ -365,82 +300,27 @@ class GraphController(QtCore.QObject):
                                 bounds=(data_min, data_max))
 
     def update_vbox(self):
-        self.update_zoom_limits()
-        self.vb.autoRange()
+        for panel in self.panels:
+            panel.autorange()
 
-    # ----------------------------------------------------
-    # Limites de zoom
-    # ----------------------------------------------------
-
-    # dézoom maximal : marge autour des courbes visibles, en part de leur étendue
-    # (0.25 de chaque côté : la plage maximale vaut 1.5 fois l'étendue des données)
-    ZOOM_OUT_MARGIN = 0.25
+    # dézoom maximal (voir PlotPanel.update_zoom_limits)
+    ZOOM_OUT_MARGIN = PlotPanel.ZOOM_OUT_MARGIN
 
     def update_zoom_limits(self):
-        """
-        Limites de zoom de la ViewBox calculées sur les courbes VISIBLES (voies, filtres,
-        signaux dérivés : différence, projection d'un modèle...). Les voies masquées
-        (ex: HZ) et les annotations n'interviennent pas.
-            - dézoom maximal : étendue des courbes + ZOOM_OUT_MARGIN de chaque côté
-            - zoom maximal   : quelques échantillons en X, 0.01 en Y
-        Sans courbe visible, les limites précédentes sont conservées.
-        """
-        # étendue calculée sur les données elles-mêmes : ViewBox.childrenBounds() ajoute
-        # une marge en pixels, convertie selon le zoom du moment (énorme quand la vue
-        # est encore minuscule, au chargement)
-        visible = [sig for sig, curve in self.curves.items()
-                   if curve.isVisible() and len(sig.x) > 0]
-        bounds = []
-        for sig in visible:
-            x = np.asarray(sig.x, dtype=float)
-            # valeur de remplacement des données manquantes comprise : elle doit rester
-            # visible
-            y = np.asarray(self._display_y(sig), dtype=float)
-            if np.isfinite(x).any() and np.isfinite(y).any():
-                bounds.append((np.nanmin(x), np.nanmax(x), np.nanmin(y), np.nanmax(y)))
-        if not bounds:
-            return
-        x0 = min(b[0] for b in bounds)
-        x1 = max(b[1] for b in bounds)
-        y0 = min(b[2] for b in bounds)
-        y1 = max(b[3] for b in bounds)
-
-        # pas d'échantillonnage le plus fin des courbes visibles
-        steps = [np.min(np.diff(np.asarray(sig.x[:100], dtype=float)))
-                 for sig in visible if len(sig.x) > 1]
-        steps = [s for s in steps if np.isfinite(s) and s > 0]
-        min_x_range = 10 * min(steps) if steps else 1e-3
-
-        # étendue minimale : une courbe plate (ou un seul point) reste zoomable
-        width_x = max(x1 - x0, min_x_range)
-        width_y = max(y1 - y0, 1.0)
-        margin_x, margin_y = self.ZOOM_OUT_MARGIN * width_x, self.ZOOM_OUT_MARGIN * width_y
-
-        self.vb.setLimits(  xMin        = x0 - margin_x,
-                            xMax        = x1 + margin_x,
-                            yMin        = y0 - margin_y,
-                            yMax        = y1 + margin_y,
-                            minXRange   = min_x_range,
-                            maxXRange   = width_x + 2 * margin_x,
-                            minYRange   = 0.01,
-                            maxYRange   = width_y + 2 * margin_y)
+        """Limites de zoom de chaque panneau, sur ses courbes visibles."""
+        for panel in self.panels:
+            panel.update_zoom_limits()
 
     # ----------------------------------------------------
-    def add_signal_curve(self, sig: SignalObject|DerivedSignalObject):
-
-        if sig not in self.curves.keys():
-            curve = SignalCurveItem(sig.x, self._display_y(sig), pen=sig.pen)
-            # voie décochée (HZ détectée à l'import, choix sauvegardé dans le projet...)
-            curve.setVisible(sig.visible)
-            curve.setCurveClickable(True)
-            curve.sigClicked.connect(self._on_curve_clicked)
-            self.plot.addItem(curve)
-            self.curves[sig] = curve
-            self.update_zoom_limits()
+    def add_signal_curve(self, sig: SignalObject|DerivedSignalObject, panel=None):
+        """Courbe de sig, dans panel (par défaut le panneau principal)."""
+        if self.panel_of(sig) is None:
+            (panel or self.main_panel).add_curve(sig, self._on_curve_clicked)
 
     def _signal_from_curve(self, curve):
-        for sig, c in self.curves.items():
-            if c is curve:
+        for panel in self.panels:
+            sig = panel.signal_of(curve)
+            if sig is not None:
                 return sig
         return None
 
@@ -478,22 +358,24 @@ class GraphController(QtCore.QObject):
     # ----------------------------------------------------
     def update_signal(self, sig):
         """Redessine la courbe après pipeline update."""
-        if sig not in self.curves:
+        panel = self.panel_of(sig)
+        if panel is None:
             return
-        curve = self.curves[sig]
-        curve.setData(sig.x, self._display_y(sig))
+        panel.redraw(sig)
         # la courbe sélectionnée reste mise en évidence
         self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
-        curve.setVisible(sig.visible)
+        panel.curves[sig].setVisible(sig.visible)
         self.update_vbox()
 
     def freeze_updates(self, freeze: bool):
         self.graph.setUpdatesEnabled(not freeze)
-        self.vb.enableAutoRange(False)
+        for panel in self.panels:
+            panel.vb.enableAutoRange(False)
         if not freeze:
             self.update_vbox()
-            self.vb.enableAutoRange(True)
-            self.vb.autoRange()
+            for panel in self.panels:
+                panel.vb.enableAutoRange(True)
+                panel.vb.autoRange()
 
     def select_graph_from_context(self,ctx:custom_items.SelectionContext):
 
@@ -533,16 +415,11 @@ class GraphController(QtCore.QObject):
         curve.setZValue(10 if highlighted else 0)
 
     def remove_signal_curve(self, signal):
-        curve = self.curves.pop(signal, None)
         if signal is self.old_highlight:
             self.old_highlight = None
-        if curve is not None:
-
-            self.plot.removeItem(curve)
-            curve.setParentItem(None)
-            curve.deleteLater()
-            self.update_zoom_limits()
-            #self.plot.removeItem(curve) #crash intempestif lors des undo/redo
+        panel = self.panel_of(signal)
+        if panel is not None:
+            panel.remove_curve(signal)
 
     def _init_cursor(self):
 
@@ -568,7 +445,7 @@ class GraphController(QtCore.QObject):
     def _on_scene_mouse_clicked(self, ev):
         pos = ev.scenePos()
 
-        if self.vb.sceneBoundingRect().contains(pos):
+        if self.panel_at(pos) is not None:
             # clic dans le graphe
             if ev.button() == QtCore.Qt.MouseButton.LeftButton:
                 self._mouse_active = True
@@ -585,9 +462,10 @@ class GraphController(QtCore.QObject):
     def _on_mouse_moved(self, ev):
         # Garde 2: souris sur le viewbox ?
         pos = ev[0]
-        if  self.vb.sceneBoundingRect().contains(pos):
+        panel = self.panel_at(pos)
+        if panel is not None:
 
-            mousePoint = self.vb.mapSceneToView(pos)
+            mousePoint = panel.vb.mapSceneToView(pos)
             # Y conservé pour le curseur libre (non accroché à une courbe)
             self._mouse_pos = mousePoint
             self.cursor_moved_X.emit(float(mousePoint.x()))
@@ -634,26 +512,12 @@ class GraphController(QtCore.QObject):
     def _remember_context_click(self, ev):
         """Mémorise la position du clic droit (ouverture du menu contextuel)."""
         if (ev.button() == QtCore.Qt.MouseButton.RightButton and
-                self.vb.sceneBoundingRect().contains(ev.scenePos())):
+                self.panel_at(ev.scenePos()) is not None):
             self._context_scene_pos = QtCore.QPointF(ev.scenePos())
 
     def nearest_sample(self, sig, scene_pos: QtCore.QPointF) -> tuple[float, float] | None:
-        """
-        Échantillon (x, y) de sig le plus proche d'un point de l'écran. La distance est
-        mesurée en pixels : un écart de 1 °C et un écart de 1 s n'ont pas le même poids
-        selon le zoom.
-        """
-        x = np.asarray(sig.x, dtype=float)
-        y = np.asarray(sig.y, dtype=float)
-        if x.size == 0:
-            return None
-        target = self.vb.mapSceneToView(scene_pos)
-        px_w, px_h = self.vb.viewPixelSize()
-        distance = ((x - target.x()) / px_w)**2 + ((y - target.y()) / px_h)**2
-        if np.all(np.isnan(distance)):
-            return None
-        i = int(np.nanargmin(distance))
-        return float(x[i]), float(y[i])
+        """Échantillon de sig le plus proche d'un point de l'écran (PlotPanel.nearest_sample)."""
+        return (self.panel_of(sig) or self.main_panel).nearest_sample(sig, scene_pos)
 
     def add_text_annotation(self, scene_pos: QtCore.QPointF | None = None):
         """
@@ -664,7 +528,9 @@ class GraphController(QtCore.QObject):
         if scene_pos is None:
             scene_pos = self._context_scene_pos
         if scene_pos is None:
-            scene_pos = self.vb.sceneBoundingRect().center()
+            scene_pos = self.main_panel.vb.sceneBoundingRect().center()
+        # textes : tracés dans le panneau principal (outils graphiques)
+        vb = self.main_panel.vb
 
         sig = self.old_highlight
         sample = None
@@ -672,12 +538,12 @@ class GraphController(QtCore.QObject):
             sample = self.nearest_sample(sig, scene_pos)
 
         if sample is None:
-            click = self.vb.mapSceneToView(scene_pos)
+            click = vb.mapSceneToView(scene_pos)
             return self.graph_tree_ctrl.addText(pos=(click.x(), click.y()))
 
         x, y = sample
-        text_scene = self.vb.mapViewToScene(QtCore.QPointF(x, y)) + self.ANNOTATION_OFFSET
-        text_pos = self.vb.mapSceneToView(text_scene)
+        text_scene = vb.mapViewToScene(QtCore.QPointF(x, y)) + self.ANNOTATION_OFFSET
+        text_pos = vb.mapSceneToView(text_scene)
         unit = getattr(sig, 'unit', '') or ''
         text = f"{sig.name}\n{y:.2f} {unit} @ {x:.0f} {self.opts['X_unit']}"
         return self.graph_tree_ctrl.addText(pos         = (text_pos.x(), text_pos.y()),
