@@ -127,3 +127,20 @@ def test_colored_annotation_kept_in_dark_mode(ctrl, graph, monkeypatch):
     assert item.lineItem.pen().color() == curve_color
     assert item.textItem.defaultTextColor() == curve_color
     assert item.to_annotation(annotation) == annotation
+
+
+# ---------------- barre de titre ----------------
+
+def test_title_bar_colorref():
+    """COLORREF de Windows : 0x00BBGGRR."""
+    assert theme._colorref("#123456") == 0x563412
+
+
+def test_title_bar_ignored_off_windows(ctrl, qapp):
+    """Hors fenêtres Windows natives (tests offscreen) : rien n'est demandé à DWM."""
+    assert not theme._native_windows()
+    theme.style_title_bar(ctrl.view, dark=True)        # sans erreur ni effet
+    theme.apply(qapp, dark_mode=False)
+    assert theme._title_bar_filter is None
+    qapp.setStyleSheet("")
+    qapp.setPalette(qapp.style().standardPalette())
