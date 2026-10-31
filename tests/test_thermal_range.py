@@ -299,3 +299,31 @@ def test_graph_option_cursors_still_follow_their_axis(ctrl, qapp):
     assert vertical.child("cursor 2").value() == 4000.0
     assert horizontal.child("cursor 2").value() == 80.0
     assert vertical.child("delta").value() == 2800.0
+
+
+def test_range_cursors_take_source_curve_color(ctrl, step_file):
+    """Après la création, les curseurs de la plage gardent la couleur de la courbe."""
+    sig = _signal(ctrl, step_file)
+    _menu_model(ctrl, sig)
+    ctrl.graph_ctrl.range_picker.region.setRegion((200.0, 599.0))
+    ctrl.graph_ctrl.range_picker.accept()
+    (cursors,) = list(ctrl.param_ctrl._linked_cursors(ctrl.param_ctrl.param))
+    expected = sig.pen.color().name()
+    for line in cursors.cursors:
+        assert line.pen.color().name() == expected
+        assert line.label.color.name() == expected
+
+
+def test_range_cursors_bounded_to_data(ctrl, step_file):
+    """Les curseurs de la plage ne sortent pas des données (comme à la création)."""
+    sig = _signal(ctrl, step_file)
+    _menu_model(ctrl, sig)
+    ctrl.graph_ctrl.range_picker.region.setRegion((200.0, 599.0))
+    ctrl.graph_ctrl.range_picker.accept()
+    (cursors,) = list(ctrl.param_ctrl._linked_cursors(ctrl.param_ctrl.param))
+    low, high = float(sig.x[0]), float(sig.x[-1])
+    first, second = cursors.cursors
+    first.setValue(low - 5000)
+    second.setValue(high + 5000)
+    assert first.value() == pytest.approx(low)
+    assert second.value() == pytest.approx(high)

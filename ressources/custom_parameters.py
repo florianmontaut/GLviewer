@@ -177,7 +177,9 @@ class LinkedCursors(pTypes.GroupParameter):
                                     pos=value,
                                     pen=opts['cursors_setting']['pen'],
                                     label=opts['cursors_setting']['label'],
-                                    labelOpts=opts['cursors_setting']['labelOpts']))
+                                    labelOpts=opts['cursors_setting']['labelOpts'],
+                                    # positions limitées (ex: aux données du signal)
+                                    bounds=opts['cursors_setting'].get('bounds')))
             if opts['cursors_setting']['angle']==90:
                 angle=0+180*i
             else:

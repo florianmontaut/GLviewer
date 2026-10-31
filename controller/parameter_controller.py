@@ -2,6 +2,8 @@
 # controller/parameter_controller.py
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor
+import pyqtgraph as pg
 from PyQt6.QtWidgets import QHeaderView
 from pyqtgraph.parametertree import Parameter, ParameterTree,parameterTypes
 from model.base_objects import SignalObject,FileObject
@@ -135,6 +137,18 @@ class ParameterController(QObject):
         sig = getattr(self, "_signal", None)
         return sig is file_obj or getattr(sig, "file", None) is file_obj
 
+    def _cursor_colors(self, cursors_setting) -> dict:
+        """
+        Curseurs d'une plage (ex: plage du modèle thermique) à la couleur de la courbe
+        source, comme pendant la sélection de la plage sur le graphique (RangePicker).
+        """
+        pen = getattr(self._signal, "pen", None)
+        if pen is None or not hasattr(pen, "color"):
+            return {}
+        color = QColor(pen.color())
+        label_opts = dict(cursors_setting.get("labelOpts", {}), color=color)
+        return {"pen": pg.mkPen(color, width=2), "labelOpts": label_opts}
+
     @staticmethod
     def _linked_cursors(param):
         """LinkedCursors présents dans un arbre de paramètres."""
@@ -244,6 +258,11 @@ class ParameterController(QObject):
                     value = obj.get_param(key)
                 value = value or self._data_range or spec["cursors_setting"]["pos"]
                 cursors_setting = dict(spec["cursors_setting"], pos=list(value))
+                cursors_setting.update(self._cursor_colors(cursors_setting))
+                # curseurs limités aux données du signal, comme pendant la sélection de la
+                # plage sur le graphique (RangePicker)
+                if self._data_range is not None:
+                    cursors_setting["bounds"] = self._data_range
                 param = LinkedCursors(  name = param_name,
                                         graphWidget = self.graph,
                                         cursors_setting = cursors_setting,

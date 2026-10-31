@@ -56,6 +56,10 @@ class BenchmarkWindow(QtWidgets.QWidget):
         self.info = QtWidgets.QLabel()
         self.info.setWordWrap(True)
 
+        # Échap ferme la fenêtre (comme une boîte de dialogue)
+        self.close_shortcut = QtGui.QShortcut(QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape),
+                                              self, activated=self.close)
+
         layout = QtWidgets.QVBoxLayout(self)
         layout.addLayout(controls)
         layout.addWidget(splitter, 1)

@@ -156,3 +156,9 @@ def test_export_csv_and_image(ctrl, essais, bench, tmp_path):
     png = tmp_path / "bench.png"
     bench.export_image(png)
     assert png.stat().st_size > 1000
+
+
+def test_escape_closes_window(ctrl, bench):
+    assert bench.window.isVisible()
+    bench.window.close_shortcut.activated.emit()
+    assert not bench.window.isVisible()
