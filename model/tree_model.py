@@ -183,15 +183,16 @@ class PipelineTreeModel(QAbstractItemModel):
             return QModelIndex()
         return self.createIndex(parent_item.row(), 0, parent_item)
 
-    # méthode inutile car le header est caché
-    def headerData(self, section, orientation, role):
-        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            if section == 0:
-                return "Signal"
-            elif section == 1:
-                return "Value @ Cursor"
-            elif section == self.GRAPH_COLUMN:
-                return "Graph"
+    # en-têtes courts : la colonne du nom garde la plus grande part de la largeur
+    HEADERS = ("Signal", "Value", "Graph")
+    HEADER_TOOLTIPS = ("Signal", "Valeur au curseur", "Graphique où la courbe est tracée")
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and 0 <= section < len(self.HEADERS):
+            if role == Qt.ItemDataRole.DisplayRole:
+                return self.HEADERS[section]
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return self.HEADER_TOOLTIPS[section]
         return None
 
 

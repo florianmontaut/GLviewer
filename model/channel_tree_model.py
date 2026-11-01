@@ -96,9 +96,16 @@ class ChannelTreeModel(QAbstractItemModel):
 
     GRAPH_COLUMN = 2
 
+    # en-têtes courts : la colonne du nom garde la plus grande part de la largeur
+    HEADERS = ("Voie", "Valeur", "Graph")
+    HEADER_TOOLTIPS = ("Voie", "Valeur au curseur", "Graphique où la courbe est tracée")
+
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return ("Voie", "Valeur au curseur", "Graph")[section]
+        if orientation == Qt.Orientation.Horizontal and 0 <= section < len(self.HEADERS):
+            if role == Qt.ItemDataRole.DisplayRole:
+                return self.HEADERS[section]
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return self.HEADER_TOOLTIPS[section]
         return None
 
     def flags(self, index):

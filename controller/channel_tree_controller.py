@@ -58,9 +58,9 @@ class ChannelTreeController(QtCore.QObject):
         header.setStretchLastSection(False)
         # nom : toute la largeur restante ; valeur et graphique toujours visibles
         header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self.tree.setColumnWidth(1, 100)
+        self.tree.setColumnWidth(1, 70)
         # colonne « Graph » : numéro du graphique de la courbe
-        self.tree.setColumnWidth(2, 50)
+        self.tree.setColumnWidth(2, 45)
         self.tree.selectionModel().selectionChanged.connect(self._on_selection_changed)
         # dépliage conservé quand les voies logiques sont reconstruites
         model.modelAboutToBeReset.connect(self._remember_expanded)

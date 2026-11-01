@@ -62,9 +62,9 @@ class TreeController(QtCore.QObject):
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.Interactive)
 
-        self.tree.setColumnWidth(1, 100)  # Valeur
+        self.tree.setColumnWidth(1, 70)  # Valeur
         # colonne « Graph » : numéro du graphique de la courbe
-        self.tree.setColumnWidth(2, 50)
+        self.tree.setColumnWidth(2, 45)
 
         self.expand_items()
         self.tree.viewport().update()

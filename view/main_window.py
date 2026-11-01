@@ -100,7 +100,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # mêmes réglages que treefile dans le .ui (largeur minimale, rapport 1 pour 6 avec
         # le graphique) : sinon les onglets s'ouvrent repliés, à 0 pixel de large
         self.tree_tabs.setSizePolicy(self.treefile.sizePolicy())
-        self.tree_tabs.setMinimumWidth(max(self.treefile.minimumWidth(), 200))
+        # 280 px : nom des voies lisible à côté des colonnes valeur et graphique
+        self.tree_tabs.setMinimumWidth(max(self.treefile.minimumWidth(), 280))
         splitter.insertWidget(position, self.tree_tabs)
         self.tree_tabs.addTab(self.treefile, "Par fichier")
         self.treechannels = QtWidgets.QTreeView()
