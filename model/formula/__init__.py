@@ -5,6 +5,8 @@ projet LEXER. API utilisée par GLviewer :
     parse(text)          -> arbre de la formule (FormulaError si syntaxe invalide)
     references(tree)     -> voies utilisées : identifiants (CH3, time...) et [noms]
     evaluate(tree, vars) -> float ou np.ndarray ; vars : {"CH3": ..., "[T AMB]": ...}
+    units.analyse(tree, {"[T AMB]": "°C"}) -> unité du résultat (homogénéité)
+Caloporteurs (fluids) : rho_water(T), cp_air(T)...
 """
 from .errors import FormulaError
 from .interpreter import CONSTANTS, Interpreter

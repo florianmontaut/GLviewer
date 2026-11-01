@@ -1164,20 +1164,31 @@ class ChannelMatchingDialog(QDialog):
 class FormulaDialog(QDialog):
     """
     Saisie d'une formule (analyse « Formula ») : formule, nom et unité de la courbe, base
-    de temps ; liste des voies à insérer (double-clic) et vérification immédiate.
+    de temps ; liste des voies à insérer (double-clic) et vérification immédiate, unité
+    calculée (homogénéité) et propriétés des caloporteurs.
     """
 
-    def __init__(self, channels: list, check, defaults: dict = None, parent=None):
+    # couleurs du message d'unité : cohérente, à relire
+    UNIT_OK, UNIT_WARNING = "color: #1e8449", "color: #d35400"
+
+    def __init__(self, channels: list, check, defaults: dict = None, parent=None,
+                 units: dict = None, analyse=None):
         """
         Args:
             channels : textes insérables ([T AMB], [200 W:T AMB], time...)
             check    : callable(params) -> (formule valide, message)
             defaults : paramètres initiaux (formula, name, unit, time_base, period)
+            units    : {texte inséré : unité de la voie}, affichée dans la liste
+            analyse  : callable(params) -> UnitReport (model.formula.units) ou None
         """
-        from PyQt6.QtWidgets import QComboBox, QListWidget, QHBoxLayout, QPushButton
+        from PyQt6.QtWidgets import (QComboBox, QListWidget, QListWidgetItem, QHBoxLayout,
+                                     QPushButton)
         super().__init__(parent)
         self.setWindowTitle("Add a formula")
         self.channel_names = list(channels)
+        self.channel_units = dict(units or {})
+        self.analyse = analyse
+        self.computed_unit = ""
         self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
         self.resize(620, 460)
         self.check = check
@@ -1197,15 +1208,30 @@ class FormulaDialog(QDialog):
         self.period.setSuffix(" s")
         self.period.setValue(defaults.get("period", 0.001))
         self.channels = QListWidget()
-        self.channels.addItems(channels)
-        self.channels.itemDoubleClicked.connect(lambda item: self._insert(item.text()))
+        for text in channels:
+            unit = self.channel_units.get(text, "")
+            item = QListWidgetItem(f"{text}    ({unit})" if unit else text)
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, text)
+            self.channels.addItem(item)
+        self.channels.itemDoubleClicked.connect(
+            lambda item: self._insert(item.data(QtCore.Qt.ItemDataRole.UserRole)))
+        # unité calculée de la formule (homogénéité) ; « Utiliser » la recopie
+        self.unit_info = QLabel()
+        self.unit_info.setWordWrap(True)
+        self.use_unit = QPushButton("Utiliser")
+        self.use_unit.setToolTip("Reprendre l'unité calculée comme unité de la courbe")
+        self.use_unit.clicked.connect(lambda: self.unit.setText(self.computed_unit))
         self.message = QLabel()
         self.message.setWordWrap(True)
 
         form = QFormLayout()
         form.addRow("Formule :", self.formula)
         form.addRow("Nom de la courbe :", self.name)
-        form.addRow("Unité :", self.unit)
+        unit_row = QHBoxLayout()
+        unit_row.addWidget(self.unit, 1)
+        unit_row.addWidget(self.use_unit)
+        form.addRow("Unité :", unit_row)
+        form.addRow("", self.unit_info)
         time_row = QHBoxLayout()
         time_row.addWidget(self.time_base)
         time_row.addWidget(self.period)
@@ -1221,13 +1247,18 @@ class FormulaDialog(QDialog):
         help_row = QHBoxLayout()
         help_label = QLabel("Voies (double-clic pour insérer) — fonctions : sin, cos, "
                             "tan, exp, log, log10, sqrt, abs, max, min, sum, avg, "
-                            "steps, interp (arguments séparés par ;)")
+                            "steps, interp, rho_water, cp_water, rho_air... "
+                            "(arguments séparés par ;)")
         help_label.setWordWrap(True)
         help_row.addWidget(help_label, 1)
         # table de correspondance (ex: puissance par paliers) : steps(...) / interp(...)
         self.table_button = QPushButton("Insérer une table…")
         self.table_button.clicked.connect(self._insert_table)
         help_row.addWidget(self.table_button)
+        # propriétés de l'eau et de l'air, puissance échangée par un caloporteur
+        self.fluid_button = QPushButton("Caloporteur…")
+        self.fluid_button.clicked.connect(self._insert_fluid)
+        help_row.addWidget(self.fluid_button)
         layout.addLayout(help_row)
         layout.addWidget(self.channels, 1)
         layout.addWidget(self.message)
@@ -1253,6 +1284,12 @@ class FormulaDialog(QDialog):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._insert(dialog.call())
 
+    def _insert_fluid(self):
+        """Propriété d'un caloporteur ou puissance échangée, insérée au curseur."""
+        dialog = FluidDialog(self.channel_names, self.channel_units, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._insert(dialog.call())
+
     def params(self) -> dict:
         return {"formula": self.formula.text().strip(), "name": self.name.text().strip()
                 or "Formula", "unit": self.unit.text().strip(),
@@ -1261,6 +1298,205 @@ class FormulaDialog(QDialog):
     def _update(self, *_):
         self.period.setEnabled(self.time_base.currentText() == "Own period")
         ok, message = self.check(self.params())
+        self.message.setText(message)
+        self.message.setStyleSheet("" if ok else "color: #c0392b")
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+        self._update_unit(ok)
+
+    def _update_unit(self, valid: bool):
+        """Unité calculée, comparée à l'unité saisie ; incohérences et remarques."""
+        from model.formula import units
+        report = self.analyse(self.params()) if self.analyse is not None and valid else None
+        self.computed_unit = ""
+        if report is None:
+            self.unit_info.setText("")
+            self.use_unit.setEnabled(False)
+            return
+        lines, warning = [], bool(report.issues)
+        if report.unit is not None:
+            self.computed_unit = report.unit.text
+            lines.append(f"Unité calculée : {units.describe(report.unit)}")
+            typed = self.unit.text().strip()
+            if typed:
+                same = units.same_dimension(typed, report.unit)
+                if same is False:
+                    warning = True
+                    lines.append(f"≠ unité saisie « {typed} » : formule ou unité à vérifier")
+                elif same is None:
+                    lines.append(f"Unité saisie « {typed} » non reconnue (non vérifiée)")
+        elif report.issues:
+            lines.append("Formule non homogène :")
+        else:
+            lines.append("Unité calculée : non déterminée")
+        lines += [f"  • {text}" for text in report.issues + report.notes]
+        self.unit_info.setText("\n".join(lines))
+        self.unit_info.setStyleSheet(self.UNIT_WARNING if warning else
+                                     self.UNIT_OK if report.unit is not None else "")
+        self.use_unit.setEnabled(bool(self.computed_unit)
+                                 and self.computed_unit != self.unit.text().strip())
+
+
+class FluidDialog(QDialog):
+    """
+    Caloporteurs (model.formula.fluids) : propriété de l'eau ou de l'air à une température
+    (rho_water([T])...), ou puissance échangée débit × ρ × cp × (T sortie - T entrée),
+    le débit étant converti en SI d'après son unité.
+    """
+
+    PROPERTY, POWER = 0, 1
+
+    def __init__(self, channels: list = (), units: dict = None, parent=None):
+        """
+        Args:
+            channels : voies proposées ([T entrée], [200 W:Débit]...)
+            units    : {voie : unité} ; unité du débit préremplie
+        """
+        from PyQt6.QtWidgets import QComboBox, QHBoxLayout
+        from model.formula import fluids
+        super().__init__(parent)
+        self.fluids = fluids
+        self.units = dict(units or {})
+        self.setWindowTitle("Caloporteur")
+        self.setWindowIcon(QtGui.QIcon(str(PATH)+'/icon.ico'))
+        self.resize(520, 340)
+        channels = [c for c in channels if c != "time"]
+
+        def channel_box(default=""):
+            box = QComboBox()
+            box.setEditable(True)
+            box.addItems(channels)
+            box.setCurrentText(default)
+            box.currentTextChanged.connect(self._update)
+            return box
+
+        def guess(words):
+            # voie dont le nom contient l'un des mots (débit, entrée...)
+            return next((c for c in channels if any(w in c.casefold() for w in words)), "")
+
+        self.fluid = QComboBox()
+        self.fluid.addItems(fluids.FLUIDS)
+        self.fluid.currentTextChanged.connect(self._update)
+
+        # onglet propriété
+        self.property = QComboBox()
+        for prefix, label in (("rho", "Masse volumique ρ"),
+                              ("cp", "Capacité thermique massique cp"),
+                              ("k", "Conductivité thermique λ"),
+                              ("mu", "Viscosité dynamique μ")):
+            self.property.addItem(label, prefix)
+        self.property.currentIndexChanged.connect(self._update)
+        self.temperature = channel_box("20")
+        property_page = QWidget()
+        property_form = QFormLayout(property_page)
+        property_form.addRow("Propriété :", self.property)
+        property_form.addRow("Température (°C) :", self.temperature)
+        property_form.addRow(QLabel("Température : un nombre ou une voie en °C."))
+
+        # onglet puissance échangée
+        self.flow = channel_box(guess(("débit", "debit", "flow")))
+        self.flow_unit = QLineEdit(self.units.get(self.flow.currentText(), ""))
+        self.flow_unit.setPlaceholderText("L/min, m³/h, kg/s...")
+        self.flow.currentTextChanged.connect(
+            lambda text: self.flow_unit.setText(self.units.get(text, self.flow_unit.text())))
+        self.flow_unit.textChanged.connect(self._update)
+        self.t_in = channel_box(guess(("entrée", "entree", "inlet", " in")))
+        self.t_out = channel_box(guess(("sortie", "outlet", "out")))
+        power_page = QWidget()
+        power_form = QFormLayout(power_page)
+        flow_row = QHBoxLayout()
+        flow_row.addWidget(self.flow, 1)
+        flow_row.addWidget(QLabel("en"))
+        flow_row.addWidget(self.flow_unit)
+        power_form.addRow("Débit :", flow_row)
+        power_form.addRow("T entrée (°C) :", self.t_in)
+        power_form.addRow("T sortie (°C) :", self.t_out)
+        note = QLabel("P = débit × ρ × cp × (T sortie - T entrée), en W ; ρ et cp à la "
+                      "température moyenne. Positive quand le fluide s'échauffe (pertes "
+                      "absorbées).")
+        note.setWordWrap(True)
+        power_form.addRow(note)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(property_page, "Propriété")
+        self.tabs.addTab(power_page, "Puissance échangée")
+        self.tabs.currentChanged.connect(self._update)
+
+        self.message = QLabel()
+        self.message.setWordWrap(True)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok |
+                                        QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        top = QFormLayout()
+        top.addRow("Fluide :", self.fluid)
+        layout = QVBoxLayout(self)
+        layout.addLayout(top)
+        layout.addWidget(self.tabs, 1)
+        layout.addWidget(self.message)
+        layout.addWidget(self.buttons)
+        self._update()
+
+    def _name(self, prefix):
+        return self.fluids.function_name(self.fluid.currentText(), prefix)
+
+    def flow_factor(self) -> tuple[str, str]:
+        """(conversion en SI écrite dans la formule : « /60000 » ou « », « volume » / « mass »)."""
+        from model.formula import units
+        text = self.flow_unit.text().strip()
+        if not text:
+            raise ValueError("Indiquez l'unité du débit (L/min, m³/h, kg/s...)")
+        try:
+            unit = units.parse_unit(text)
+        except units.UnitError as e:
+            raise ValueError(f"Unité du débit : {e}")
+        kinds = {units.parse_unit("m³/s").dims: "volume", units.parse_unit("kg/s").dims: "mass"}
+        if unit.dims not in kinds:
+            raise ValueError(f"« {text} » n'est pas un débit (volumique ou massique)")
+        inverse = 1 / unit.scale
+        if abs(unit.scale - 1) < 1e-12:
+            factor = ""
+        elif abs(inverse - round(inverse)) < 1e-9 * inverse:
+            factor = f"/{round(inverse)}"
+        else:
+            factor = f"*{unit.scale:.10g}"
+        return factor, kinds[unit.dims]
+
+    def call(self) -> str:
+        """Texte inséré dans la formule ; ValueError si la saisie est incomplète."""
+        if self.tabs.currentIndex() == self.PROPERTY:
+            t = self.temperature.currentText().strip()
+            if not t:
+                raise ValueError("Indiquez une température (nombre ou voie)")
+            return f"{self._name(self.property.currentData())}({t})"
+        flow, t_in, t_out = (box.currentText().strip()
+                             for box in (self.flow, self.t_in, self.t_out))
+        if not (flow and t_in and t_out):
+            raise ValueError("Choisissez le débit et les températures d'entrée et de sortie")
+        factor, kind = self.flow_factor()
+        mean = f"avg({t_in};{t_out})"
+        rho = f"*{self._name('rho')}({mean})" if kind == "volume" else ""
+        return f"{flow}{factor}{rho}*{self._name('cp')}({mean})*({t_out}-{t_in})"
+
+    def _preview(self) -> str:
+        """Valeur de la propriété quand la température est un nombre."""
+        name = self._name(self.property.currentData())
+        prop = self.fluids.PROPERTIES[name]
+        text = f"en {prop.unit}, table de {prop.t_min:g} à {prop.t_max:g} °C"
+        try:
+            t = float(self.temperature.currentText().replace(",", "."))
+        except ValueError:
+            return text
+        value = float(self.fluids.evaluate(name, t))   # FormulaError hors plage
+        return text + f"\n{prop.symbol}({t:g} °C) = {value:.5g} {prop.unit}"
+
+    def _update(self, *_):
+        try:
+            message = self.call()
+            if self.tabs.currentIndex() == self.PROPERTY:
+                message += "\n" + self._preview()
+            ok = True
+        except ValueError as e:                     # FormulaError compris
+            ok, message = False, str(e)
         self.message.setText(message)
         self.message.setStyleSheet("" if ok else "color: #c0392b")
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)

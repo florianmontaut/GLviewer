@@ -4,7 +4,7 @@ import numpy as np
 from .nodes import *
 from .values import *
 from .errors import FormulaError
-from . import lut
+from . import fluids, lut
 
 CONSTANTS = {'pi': np.pi, 'e': np.e}
 
@@ -115,6 +115,13 @@ class Interpreter:
             xs, ys = lut.check_table(func, args)
             evaluate = getattr(lut, func)
             return self.compute(func, lambda x: evaluate(x[0], xs, ys), args[:1])
+
+        if func in fluids.PROPERTIES:
+            # caloporteur : propriété à la température donnée (°C)
+            if len(args) != 1:
+                raise FormulaError(f"Function '{func}' expects 1 argument (temperature in °C), "
+                                   f"got {len(args)}")
+            return self.compute(func, lambda x: fluids.evaluate(func, x[0]), args)
 
         if func not in table:
             raise FormulaError(f"Unknown function '{func}'")

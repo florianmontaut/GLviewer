@@ -1590,6 +1590,30 @@ class MainController(QtCore.QObject):
                 channels += [f"[{prefix}:{s.name}]" for s in other.signals]
         return channels
 
+    def formula_channel_units(self, file_obj) -> dict:
+        """{voie insérable (voir formula_channels) : unité}, voies avec unité seulement."""
+        units = {"time": "s"}
+        for other in self.workspace.files:
+            prefix = "" if other is file_obj else f"{other.label or other.name}:"
+            units.update({f"[{prefix}{s.name}]": s.unit for s in other.signals
+                          if getattr(s, "unit", "")})
+        return units
+
+    @staticmethod
+    def formula_units(file_obj, params, current=None):
+        """
+        Unité de la formule (model.formula.units.UnitReport), d'après les unités des voies
+        utilisées ; None si la formule est invalide.
+        """
+        from model.formula import units
+        try:
+            trial = ComputedSignal(file_obj, replaces=current, **{"name": "Formula", **params})
+            inputs = trial.inputs()
+        except ValueError:                  # FormulaError compris
+            return None
+        return units.analyse(trial._tree, {key: getattr(sig, "unit", "")
+                                           for key, sig in inputs.items()})
+
     @staticmethod
     def check_formula(file_obj, params, current=None) -> tuple[bool, str]:
         """
@@ -1624,7 +1648,9 @@ class MainController(QtCore.QObject):
     def _ask_formula(self, file_obj, defaults=None) -> dict | None:
         dialog = FormulaDialog(self.formula_channels(file_obj),
                                lambda params: self.check_formula(file_obj, params),
-                               defaults, parent=self.view)
+                               defaults, parent=self.view,
+                               units=self.formula_channel_units(file_obj),
+                               analyse=lambda params: self.formula_units(file_obj, params))
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return None
         return dialog.params()
