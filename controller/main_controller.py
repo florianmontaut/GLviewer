@@ -541,8 +541,11 @@ class MainController(QtCore.QObject):
         # --------------------------------------------------
         if source != "graph":
             self.graph_ctrl.select_graph_from_context(ctx)
-        # courbe mise en évidence (None pour un fichier) : le curseur souris s'y accroche
-        self.cursor_ctrl.set_signal(self.graph_ctrl.old_highlight)
+        # courbe mise en évidence (None pour un fichier) : le curseur souris s'y accroche,
+        # sauf une voie logique (graphique à part, sa valeur est affichée à côté d'elle)
+        highlighted = self.graph_ctrl.old_highlight
+        self.cursor_ctrl.set_signal(None if getattr(highlighted, "is_digital", False)
+                                    else highlighted)
         self._refresh_cursor()
         # vue « Par voie » : instance de la voie sélectionnée (rien pour un fichier)
         if source != "channels":

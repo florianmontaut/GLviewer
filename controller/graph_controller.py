@@ -11,6 +11,7 @@ from ressources import custom_graph_functions,custom_types,custom_items,custom_m
 
 from controller.graph_context_menu_controller import GraphContextMenu
 from controller.graph_option_controller import GraphTreeController
+from controller.logic_plot import LogicPlot
 
 class RelativeTimeAxis(pg.DateAxisItem):
     #? faire de même pour l'axe Y ?
@@ -281,7 +282,8 @@ class GraphController(QtCore.QObject):
         if self.missing_placeholder != missing_before:
             # affichage des données manquantes modifié : toutes les courbes redessinées
             for sig, curve in self.curves.items():
-                curve.setData(sig.x, self._display_y(sig))
+                if sig not in self.logic:
+                    curve.setData(sig.x, self._display_y(sig))
             self.update_vbox()
 
         if self.opts["downsample"]:
@@ -339,6 +341,8 @@ class GraphController(QtCore.QObject):
         self.vb = self.plot.vb
         self.plot.plot()
         self.vb.autoRange()
+        # voies logiques (0 / 1) : graphique au-dessus, axe des temps commun
+        self.logic = LogicPlot(self.graph, self.plot)
 
     def start_range_selection(self, sig: SignalObject):
         """
@@ -380,8 +384,9 @@ class GraphController(QtCore.QObject):
         # étendue calculée sur les données elles-mêmes : ViewBox.childrenBounds() ajoute
         # une marge en pixels, convertie selon le zoom du moment (énorme quand la vue
         # est encore minuscule, au chargement)
+        # voies logiques exclues : elles ont leur propre graphique (axe X commun)
         visible = [sig for sig, curve in self.curves.items()
-                   if curve.isVisible() and len(sig.x) > 0]
+                   if curve.isVisible() and len(sig.x) > 0 and sig not in self.logic]
         bounds = []
         for sig in visible:
             x = np.asarray(sig.x, dtype=float)
@@ -421,6 +426,14 @@ class GraphController(QtCore.QObject):
     def add_signal_curve(self, sig: SignalObject|DerivedSignalObject):
 
         if sig not in self.curves.keys():
+            if getattr(sig, "is_digital", False):
+                # voie logique : graphique des voies logiques, tracé en escalier
+                curve = pg.PlotDataItem(pen=sig.pen)
+                curve.setCurveClickable(True)
+                curve.sigClicked.connect(self._on_curve_clicked)
+                self.curves[sig] = curve
+                self.logic.add(sig, curve)
+                return
             curve = SignalCurveItem(sig.x, self._display_y(sig), pen=sig.pen)
             # voie décochée (HZ détectée à l'import, choix sauvegardé dans le projet...)
             curve.setVisible(sig.visible)
@@ -473,6 +486,11 @@ class GraphController(QtCore.QObject):
         if sig not in self.curves:
             return
         curve = self.curves[sig]
+        if sig in self.logic:
+            # voie logique : rangs recalculés (une voie masquée ne laisse pas de vide)
+            self.logic.relayout()
+            self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
+            return
         curve.setData(sig.x, self._display_y(sig))
         # la courbe sélectionnée reste mise en évidence
         self._apply_curve_pen(sig, highlighted = sig is self.old_highlight)
@@ -528,7 +546,9 @@ class GraphController(QtCore.QObject):
         curve = self.curves.pop(signal, None)
         if signal is self.old_highlight:
             self.old_highlight = None
-        if curve is not None:
+        if curve is not None and signal in self.logic:
+            self.logic.remove(signal)
+        elif curve is not None:
 
             self.plot.removeItem(curve)
             curve.setParentItem(None)
@@ -577,6 +597,11 @@ class GraphController(QtCore.QObject):
     def _on_mouse_moved(self, ev):
         # Garde 2: souris sur le viewbox ?
         pos = ev[0]
+        logic_vb = self.logic.plot.vb if self.logic.shown else None
+        if logic_vb is not None and logic_vb.sceneBoundingRect().contains(pos):
+            # graphique des voies logiques : même axe des temps, curseur sans ordonnée
+            self.cursor_moved_X.emit(float(logic_vb.mapSceneToView(pos).x()))
+            return
         if  self.vb.sceneBoundingRect().contains(pos):
 
             mousePoint = self.vb.mapSceneToView(pos)
@@ -589,6 +614,7 @@ class GraphController(QtCore.QObject):
 
         if x is None:
             return
+        self.logic.set_cursor(x)
         if y is None:
             # curseur libre : il suit la souris
             y = float(self._mouse_pos.y())

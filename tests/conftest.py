@@ -85,6 +85,10 @@ def ctrl(qapp, qt_errors, warnings_shown, dialogs_opened, tmp_path, monkeypatch)
     # (boîte bloquante) ; tests/test_save_project.py remplace cette réponse
     monkeypatch.setattr(controller, "_ask_unsaved_changes", lambda: "discard")
     yield controller
+    # événements en attente (ex: validation différée d'un champ numérique du
+    # ParameterTree) traités tant que les widgets de CE test existent : sinon ils
+    # s'exécutent dans un test suivant, sur des widgets détruits entre-temps
+    qapp.processEvents()
     window.close()
 
 

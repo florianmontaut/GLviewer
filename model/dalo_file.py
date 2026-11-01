@@ -72,7 +72,11 @@ class DaloFileObject(FileObject):
         sig = super().add_signal(name)
         settings = self._channel(name) or {}
         color = COLORS.get(settings.get("color") or "")
-        if color is not None and not settings.get("digital"):
+        if settings.get("digital"):
+            # voie logique : trait plein (la palette passe aux pointillés au-delà de 20
+            # voies), plus épais pour rester lisible dans sa ligne du graphique logique
+            sig.pen = pg.mkPen(color=sig.pen.color(), width=2)
+        elif color is not None:
             sig.pen = pg.mkPen(color=color)
         return sig
 
