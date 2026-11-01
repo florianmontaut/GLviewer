@@ -27,6 +27,14 @@ class GLImportError(Exception):
     """Erreur générique d'import GL"""
     pass
 
+class DaloImportError(Exception):
+    """Erreur générique d'import d'un enregistrement d'événement FLXDrive (DALO)"""
+    pass
+
+class DaloStructureError(DaloImportError):
+    """En-tête ou description des voies introuvable / incohérente"""
+    pass
+
 class JSONImportError(Exception):
     """Erreur générique d'import JSON"""
     pass

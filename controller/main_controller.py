@@ -131,6 +131,8 @@ class MainController(QtCore.QObject):
                                                     custom_types.fileType.GL))
         self.view.actionLoad_json.triggered.connect(lambda: self.import_ctrl.load_file_dialog(
                                                     custom_types.fileType.JSON))
+        self.view.actionLoad_dalo.triggered.connect(lambda: self.import_ctrl.load_file_dialog(
+                                                    custom_types.fileType.DALO))
         self.view.actionImport_txt.triggered.connect(lambda: self.import_ctrl.load_file_dialog(
                                                     custom_types.fileType.TXT))
         self.view.actionGeneric_csv_file.triggered.connect(lambda: self.import_ctrl.

@@ -259,7 +259,7 @@ class PipelineTreeModel(QAbstractItemModel):
             if role == Qt.ItemDataRole.DisplayRole and col == 0:
                 return f"{obj.name} — {obj.label}" if obj.label else obj.name
             if role == Qt.ItemDataRole.ToolTipRole:
-                return obj.address
+                return obj.tooltip
 
         if role == Qt.ItemDataRole.DisplayRole and col == 0:
             if obj_type in (itemType.ANALYSE, itemType.FILTER):

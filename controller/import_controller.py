@@ -8,7 +8,8 @@ from ressources import (custom_functions,custom_items,custom_types,
                         custom_dialogs,custom_exceptions)
 from model.base_objects import Workspace,FileObject
 from model.annotations import TextAnnotation
-from model import txt_import
+from model import dalo_import, txt_import
+from model.dalo_file import create_file_object
 from model.filters.filter_factory import FilterFactory
 from model.analysis.analysis_factory import AnalysisFactory
 
@@ -44,6 +45,13 @@ class ImportController(QtCore.QObject):
                                                     loader_label=("Loading .csv files",
                                                                 "csv Files (*.csv)"),
                                                     loader= self.openCsvFiles
+                                                    ),
+                            custom_types.fileType.DALO:
+                            custom_items.ImportRequest(
+                                                    file_format=custom_types.fileType.DALO,
+                                                    loader_label=("Loading FLXDrive event logs",
+                                                                "csv Files (*.csv)"),
+                                                    loader= self.openDalo
                                                     ),
                             custom_types.fileType.JSON:
                             custom_items.ImportRequest(
@@ -325,6 +333,7 @@ class ImportController(QtCore.QObject):
 
         #?revoir le principe de dictionnaire qui semble alambiqué
         format_dict=    {custom_types.fileType.GL:"Graphtec CSV file",
+                        custom_types.fileType.DALO:"FLXDrive event log",
                         custom_types.fileType.JSON:"JSON file",
                         custom_types.fileType.TXT:"Plain Txt file",
                         custom_types.fileType.CSV:"Plain CSV file"}
@@ -459,10 +468,41 @@ class ImportController(QtCore.QObject):
         else:
             return file_caracs
 
+    def openDalo(self,fname,settings=None):
+        """
+        Enregistrement d'événement FLXDrive (.csv, voir model.dalo_import) : temps du
+        fichier (0 = déclenchement), informations de l'événement, plage et couleur des voies.
+        Les voies ne sont pas masquées hors de leur plage : dans un enregistrement de
+        défaut, une valeur saturée est justement l'information recherchée.
+        """
+        result = dalo_import.parse_dalo(fname)
+        data = result.data.set_index('Time',append=True)
+        file_caracs=custom_items.FileStruct(
+                                            address         = fname,
+                                            file_type       = custom_types.fileType.DALO.name,
+                                            sampling        = result.sampling,
+                                            n_samples       = len(result.data),
+                                            recordDate      = result.title,
+                                            import_params   = {
+                                                'event'         : result.event,
+                                                'channels'      : result.channels,
+                                                'check_table'   : [True]*len(result.channels),
+                                                },
+                                            data            = data,
+                                        )
+        if result.invalid_cells:
+            self.view.statusbar.showMessage(
+                    f"{result.invalid_cells} valeur(s) non numérique(s) : données manquantes",
+                    10000)
+        if self._from_project == custom_types.ImportMode.INTERACTIVE:
+            self.send_file_to_workspace(file_caracs)
+        else:
+            return file_caracs
+
     def send_file_to_workspace(self,file_caracs:custom_items.FileStruct):
 
-        # Création du modèle métier
-        file_obj = FileObject(file_caracs)
+        # Création du modèle métier (FileObject adapté au type de fichier)
+        file_obj = create_file_object(file_caracs)
         # Ajouter chaque colonne comme signal brut
         for col in file_obj.data.columns[:]:
             file_obj.add_signal(col)
@@ -632,7 +672,7 @@ class ImportController(QtCore.QObject):
                         )
                     break
 
-            file_obj = FileObject(file_caracs)
+            file_obj = create_file_object(file_caracs)
             # paramètres du fichier (absents des projets plus anciens)
             file_obj.set_params({key: file_data[key]
                                  for key in ('sampling','offset','start_x','stop_x','label')
@@ -694,6 +734,9 @@ class ImportController(QtCore.QObject):
             self.ImportWizard(fname,params)
         except custom_exceptions.JSONImportError as e:
             self._project_error(e)
+        except custom_exceptions.DaloImportError as e:
+            QtWidgets.QMessageBox.warning(self.view, "Enregistrement d'événement invalide",
+                                          str(e))
         except Exception as err:
             errorStruct=[err,fileType,fname,params]
             self.ImportErrorUserWarning(errorStruct)
@@ -723,6 +766,10 @@ class ImportController(QtCore.QObject):
 
         if isinstance(fname,list):
             fname=fname[0]
+        if (fileType in (custom_types.fileType.GL, custom_types.fileType.CSV,
+                         custom_types.fileType.TXT) and dalo_import.is_dalo(fname)):
+            # enregistrement d'événement FLXDrive ouvert depuis un autre menu
+            import_request = self.load_dict[custom_types.fileType.DALO]
 
         try:
             self.view.statusbar.showMessage(f"Loading file: {fname}",3000)
@@ -731,6 +778,11 @@ class ImportController(QtCore.QObject):
             if fileType == custom_types.fileType.JSON:
                 # l'import wizard (fichiers texte) ne sait pas ouvrir un projet
                 self._project_error(e)
+                return
+            if import_request.file_format == custom_types.fileType.DALO:
+                # ni un enregistrement d'événement
+                QtWidgets.QMessageBox.warning(self.view,
+                                              "Enregistrement d'événement invalide", str(e))
                 return
             print(e)
             self.ImportWizard(fname)

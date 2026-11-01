@@ -29,6 +29,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # fermeture de la fenêtre : callable() -> bool, False pour l'annuler (travail non
         # enregistré, voir MainController.confirm_discard)
         self.close_guard = None
+        # enregistrements d'événement FLXDrive (DALO)
+        self.actionLoad_dalo = QtGui.QAction("FLXDrive event log (.csv)", self)
+        self.menuLoad_Workspace.insertAction(self.actionLoad_json, self.actionLoad_dalo)
         # comparaison des essais (modèles thermiques) : fenêtre à part
         self.actionBenchmark = QtGui.QAction("Benchmark window", self)
         self.menuOptions.addAction(self.actionBenchmark)

@@ -47,6 +47,7 @@ class fileType(Enum):
     CSV     = auto()
     VCD     = auto()
     JSON    = auto()
+    DALO    = auto()    # enregistrement d'événement FLXDrive (.csv, voir model.dalo_import)
 
 
 class cursorType(Enum):

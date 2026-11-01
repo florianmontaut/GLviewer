@@ -115,6 +115,12 @@ class FileObject:
         self.label = getattr(self, "label", "")    # point de fonctionnement de l'essai
         # période lue à l'import (la période peut être corrigée, voir set_sampling)
         self.imported_sampling = self.sampling
+        # premier instant de l'enregistrement, sans décalage (0 en général ; négatif pour
+        # un enregistrement d'événement : 0 = déclenchement)
+        times = self.data.index.get_level_values(-1) if self.data is not None else []
+        self.time_origin = float(times[0]) if len(times) else 0.0
+        if not np.isfinite(self.time_origin):
+            self.time_origin = 0.0
         # fichier retiré de l'espace de travail (conservé pour l'undo)
         self.removed = False
         self.signals = []   # Liste de SignalObject
@@ -161,8 +167,9 @@ class FileObject:
             self.data = self.data.reset_index(level = 1,drop = True)
         #ajout d'une colonne Time / pas besoin de l'insérer en tête de la dataFrame
         #comme dans les versions précédentes
-        self.data['Time'] = np.linspace(self.offset,
-                                        self.offset+(self.n_samples-1)*self.sampling,
+        start = self.time_origin + self.offset
+        self.data['Time'] = np.linspace(start,
+                                        start+(self.n_samples-1)*self.sampling,
                                         self.n_samples)
         #on définit la nouvelle colonne time comme deuxième index
         self.data = self.data.set_index('Time',append = True)
@@ -247,6 +254,14 @@ class FileObject:
     def get_y(self, name):
         """Valeurs brutes d'une voie après troncature (copie)."""
         return self.get_raw_y(name)[self.window()]
+
+    def configure_signal(self, sig):
+        """Réglages d'une voie propres au type de fichier (aucun par défaut)."""
+
+    @property
+    def tooltip(self) -> str:
+        """Infobulle du fichier dans l'arbre."""
+        return self.address
 
     def add_signal(self, name: str):
         """Ajoute un signal brut ou calculé."""
@@ -380,6 +395,8 @@ class SignalObject:
     item_type = itemType.RAW
     # voie calculée par une formule (model.computed.ComputedSignal)
     is_computed = False
+    # voie logique (0 / 1) d'un enregistrement d'événement (model.dalo_import)
+    is_digital = False
     PARAMETER_SCHEMA= {
                         'Curve name'    :{
                                             'type':'str',
@@ -444,6 +461,9 @@ class SignalObject:
         self._cache_raw_x = None   # axe brut ayant servi au calcul du cache
         self._cache_valid = False
         self._cache_version = None # pipeline_version ayant servi au calcul du cache
+        # réglages propres au type de fichier (ex: voie logique d'un enregistrement
+        # d'événement, voir model.dalo_file) ; un projet relu rétablit ensuite les siens
+        file_obj.configure_signal(self)
 
     # ---------------- BASIC RAW ACCESS ----------------
 
@@ -733,7 +753,8 @@ class SignalObject:
 
         # id : identité de la voie d'un enregistrement à l'autre (ex: voie de puissance
         # d'un modèle thermique, retrouvée même si elle est renommée)
-        arg_to_export= ['id','name','visible','pen','pipeline','analyses','is_reference']
+        arg_to_export= ['id','name','unit','visible','pen','pipeline','analyses',
+                        'is_reference']
         obj_params = {k: v for k, v in self.__dict__.items() if k in arg_to_export }
         obj_params['pipeline'] = [(n_id,node.to_dict()) for n_id,node in
                                     obj_params['pipeline'].items()] 
@@ -757,6 +778,7 @@ class SignalObject:
         # projets antérieurs à la sauvegarde de l'id : nouvel id (celui de __init__)
         sig.id          =   data.get("id") or sig.id
         sig.visible     =   data.get("visible", True)
+        sig.unit        =   data.get("unit", sig.unit)
         sig.pen         =   custom_struct_functions.dict_to_QPen( data.get("pen"))
 
         #! Ordered dict n'est pas sérialisable ! => liste de [id, node_dict]
