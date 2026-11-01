@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt, QModelIndex, QAbstractItemModel
 from PyQt6.QtGui import QBrush,QFont
 from model.tree_item import TreeItem
 from model.benchmark import power_text
-from model.base_objects import FileObject, SignalObject,Workspace, graph_signals_mime,                               GRAPH_SIGNALS_MIME
+from model.base_objects import FileObject, SignalObject,Workspace, graph_signals_mime,                               graph_numbers_text,                               GRAPH_SIGNALS_MIME
 from model.filters.base_filter import FilterNode
 from model.analysis.base_analysis import AnalysisNode
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -190,6 +190,8 @@ class PipelineTreeModel(QAbstractItemModel):
                 return "Signal"
             elif section == 1:
                 return "Value @ Cursor"
+            elif section == self.GRAPH_COLUMN:
+                return "Graph"
         return None
 
 
@@ -202,7 +204,10 @@ class PipelineTreeModel(QAbstractItemModel):
 
     # 0 = Nom + icône + Visible (checkbox)
     # 1 = Valeur au curseur
-        return 2
+    # 2 = graphique empilé de la courbe (paramètre « Graph »)
+        return 3
+
+    GRAPH_COLUMN = 2
 
 
     def index_from_item(self, item: TreeItem):
@@ -260,6 +265,20 @@ class PipelineTreeModel(QAbstractItemModel):
                 return obj.display_name
             else:
                 return obj.name
+
+        # ---------------- colonne 2 : graphique de la courbe ----------------
+        if col == self.GRAPH_COLUMN:
+            if role == Qt.ItemDataRole.TextAlignmentRole:
+                return Qt.AlignmentFlag.AlignCenter
+            if role == Qt.ItemDataRole.DisplayRole:
+                if obj_type == itemType.RAW:
+                    return str(obj.graph_number)
+                if obj_type == itemType.FILE:
+                    return graph_numbers_text(obj.signals)
+                return None
+            if role == Qt.ItemDataRole.ToolTipRole and obj_type in (itemType.RAW,
+                                                                     itemType.FILE):
+                return "Graphique où la courbe est tracée (1 : celui du haut)"
 
         # ---------------- colonne 1 : valeur au curseur ----------------
         if role == Qt.ItemDataRole.DisplayRole and col == 1:
@@ -605,6 +624,17 @@ class PipelineTreeModel(QAbstractItemModel):
         if item is None:
             return QModelIndex()
         return self.index_from_item(item)
+
+    def refresh_graph_column(self):
+        """Colonne « Graph » (graphique des voies modifié)."""
+        for file_item in self.root.children:
+            file_index = self.index_from_item(file_item)
+            self.dataChanged.emit(file_index.siblingAtColumn(self.GRAPH_COLUMN),
+                                  file_index.siblingAtColumn(self.GRAPH_COLUMN))
+            if file_item.child_count():
+                self.dataChanged.emit(self.index(0, self.GRAPH_COLUMN, file_index),
+                                      self.index(file_item.child_count() - 1,
+                                                 self.GRAPH_COLUMN, file_index))
 
     def iter_signal_indexes(self):
         """(SignalObject, QModelIndex) des signaux bruts présents dans l'arbre."""

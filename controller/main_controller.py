@@ -1494,6 +1494,10 @@ class MainController(QtCore.QObject):
                 self.graph_ctrl.update_signal(sig)
         finally:
             self.graph_ctrl.freeze_updates(False)
+        # colonnes « Graph » des arbres
+        if self.model is not None:
+            self.model.refresh_graph_column()
+        self.channel_model.refresh()
         QtCore.QTimer.singleShot(0, self._update_title)
         # « Graph » affiché dans le ParameterTree (voie, fichier, groupe) à jour ; différé :
         # l'arbre peut être à l'origine du changement

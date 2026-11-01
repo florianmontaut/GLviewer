@@ -12,7 +12,7 @@ from PyQt6.QtGui import QFont
 
 from model.tree_item import TreeItem
 from model.channels import build_channel_tree
-from model.base_objects import graph_signals_mime, GRAPH_SIGNALS_MIME
+from model.base_objects import graph_signals_mime, GRAPH_SIGNALS_MIME, graph_numbers_text
 from ressources.custom_types import itemType
 from ressources import theme
 
@@ -91,12 +91,14 @@ class ChannelTreeModel(QAbstractItemModel):
         return item.child_count()
 
     def columnCount(self, parent=QModelIndex()):
-        # 0 = voie / fichier, 1 = valeur au curseur
-        return 2
+        # 0 = voie / fichier, 1 = valeur au curseur, 2 = graphique de la courbe
+        return 3
+
+    GRAPH_COLUMN = 2
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return ("Voie", "Valeur au curseur")[section]
+            return ("Voie", "Valeur au curseur", "Graph")[section]
         return None
 
     def flags(self, index):
@@ -119,6 +121,15 @@ class ChannelTreeModel(QAbstractItemModel):
             return None
         obj = index.internalPointer().obj
         col = index.column()
+        if col == self.GRAPH_COLUMN:
+            # graphique de la voie, ou des voies d'une voie logique / d'un groupe
+            if role == Qt.ItemDataRole.DisplayRole:
+                signals = obj.signals if obj.item_type in CONTAINERS else [obj]
+                return graph_numbers_text(signals)
+            if role == Qt.ItemDataRole.TextAlignmentRole:
+                return Qt.AlignmentFlag.AlignCenter
+            if role == Qt.ItemDataRole.ToolTipRole:
+                return "Graphique où la courbe est tracée (1 : celui du haut)"
         if obj.item_type in CONTAINERS:
             return self._container_data(obj, col, role)
         return self._instance_data(obj, col, role)

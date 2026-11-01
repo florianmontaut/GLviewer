@@ -51,6 +51,12 @@ GROUP_GRAPH_PARAM = {
                     }
 
 
+def graph_numbers_text(signals) -> str:
+    """Graphiques de voies, pour les arbres : « 2 », ou « 1, 3 » s'ils diffèrent."""
+    numbers = sorted({getattr(sig, "graph_number", 1) for sig in signals})
+    return ", ".join(str(n) for n in numbers)
+
+
 def common_graph_number(signals) -> int:
     """Numéro de graphique commun à des voies, 0 s'ils diffèrent (1 sans voie)."""
     numbers = {getattr(sig, "graph_number", 1) for sig in signals}

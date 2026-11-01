@@ -982,3 +982,42 @@ def test_cursor_labels_survive_detached_panel_removal(ctrl, three_panels, files,
     graph.graph.grab()
     qapp.processEvents()
     assert cursor.valtext._lastScene is graph.graph.scene()
+
+
+# ---------------- colonne « Graph » des arbres ----------------
+
+def _graph_cell(model, obj, find):
+    index = find(obj)
+    return model.data(index.siblingAtColumn(model.GRAPH_COLUMN),
+                      QtCore.Qt.ItemDataRole.DisplayRole)
+
+
+def test_graph_column_in_file_tree(ctrl, files):
+    model = ctrl.model
+    find = lambda obj: model.index_from_item(model.find_item(model.root, obj))
+    assert model.columnCount(QtCore.QModelIndex()) == 3
+    assert model.headerData(2, QtCore.Qt.Orientation.Horizontal,
+                            QtCore.Qt.ItemDataRole.DisplayRole) == "Graph"
+    assert _graph_cell(model, files[0].signals[0], find) == "1"
+    assert _graph_cell(model, files[0], find) == "1"
+    _set_graph(ctrl, files[0].signals[1], 3)
+    assert _graph_cell(model, files[0].signals[1], find) == "3"
+    assert _graph_cell(model, files[0], find) == "1, 3"
+    _undo(ctrl)
+    assert _graph_cell(model, files[0], find) == "1"
+
+
+def test_graph_column_in_channel_tree(ctrl, files, monkeypatch):
+    monkeypatch.setattr(ctrl, "_ask_group_name", lambda title, default: "Sinus")
+    key = next(g.key for g in ctrl.channel_model.groups() if g.name == "CH2")
+    ctrl.edit_channel_groups("new", [key])
+    model = ctrl.channel_model
+    _set_graph(ctrl, files[1].signals[1], 2)
+    group_index = model.index(0, 0)                 # groupe « Sinus »
+    cell = lambda index: model.data(index.siblingAtColumn(model.GRAPH_COLUMN))
+    assert model.headerData(2, QtCore.Qt.Orientation.Horizontal) == "Graph"
+    assert cell(group_index) == "1, 2"
+    channel_index = model.index(0, 0, group_index)  # voie logique CH2
+    assert cell(channel_index) == "1, 2"
+    instances = [model.index(r, 0, channel_index) for r in range(model.rowCount(channel_index))]
+    assert sorted(cell(i) for i in instances) == ["1", "2"]

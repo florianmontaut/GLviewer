@@ -56,11 +56,15 @@ class TreeController(QtCore.QObject):
         selection_model = self.tree.selectionModel()
         header = self.tree.header()
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Interactive)
+        # nom : toute la largeur restante ; valeur et graphique toujours visibles, même
+        # dans un panneau étroit
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.Interactive)
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.Interactive)
 
-        self.tree.setColumnWidth(0, 250)  # Nom du signal
         self.tree.setColumnWidth(1, 100)  # Valeur
+        # colonne « Graph » : numéro du graphique de la courbe
+        self.tree.setColumnWidth(2, 50)
 
         self.expand_items()
         self.tree.viewport().update()
