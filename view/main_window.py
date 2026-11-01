@@ -15,6 +15,9 @@ class MainWindow(QtWidgets.QMainWindow):
     pour que les controllers s'y connectent.
     """
 
+    # fermeture acceptée (après close_guard) : fenêtres des graphiques détachés fermées
+    closing = QtCore.pyqtSignal()
+
     def __init__(self,**opts):
         super().__init__()
         uic.loadUi(PATH/"MainWindow2.ui", self)
@@ -82,6 +85,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.close_guard is not None and not self.close_guard():
             event.ignore()
             return
+        # graphiques détachés : leurs fenêtres sont fermées
+        self.closing.emit()
         super().closeEvent(event)
 
     def _init_tree_tabs(self):

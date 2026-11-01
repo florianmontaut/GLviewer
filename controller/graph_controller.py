@@ -12,6 +12,7 @@ from ressources import custom_graph_functions,custom_types,custom_items,custom_m
 
 from controller.graph_context_menu_controller import GraphContextMenu
 from controller.graph_option_controller import GraphTreeController
+from view.detached_graph_window import DetachedGraphWindow
 # axes et courbe : controller.plot_panel (noms conservés ici pour les imports existants)
 from controller.plot_panel import (PlotPanel, RelativeTimeAxis, SignalCurveItem,
                                    AdaptiveAxisItem)
@@ -39,7 +40,8 @@ class RangePicker(QtCore.QObject):
         self._shortcuts = []
         # tracé de la zone selon le signal (remplacé par le GraphController)
         self.plot_of = lambda signal: plot
-        self.plot.scene().sigMouseClicked.connect(self._on_mouse_clicked)
+        self._main_scene = self.plot.scene()
+        self._main_scene.sigMouseClicked.connect(self._on_mouse_clicked)
 
     @property
     def is_active(self) -> bool:
@@ -72,7 +74,8 @@ class RangePicker(QtCore.QObject):
                             (QtCore.Qt.Key.Key_Enter,   self.accept),
                             (QtCore.Qt.Key.Key_Escape,  self.cancel)):
             shortcut = QtGui.QShortcut(QtGui.QKeySequence(keys), self.shortcut_parent)
-            shortcut.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
+            # toute fenêtre de l'application : la zone peut être dans un graphique détaché
+            shortcut.setContext(QtCore.Qt.ShortcutContext.ApplicationShortcut)
             shortcut.activated.connect(slot)
             self._shortcuts.append(shortcut)
 
@@ -104,8 +107,12 @@ class RangePicker(QtCore.QObject):
         self.region = None
         self.signal = None
 
-    def _on_mouse_clicked(self, ev):
+    def _on_mouse_clicked(self, ev, scene=None):
+        """Double-clic dans la zone : validation (scene : scène du clic, par défaut celle
+        de la fenêtre principale)."""
         if not self.is_active or not ev.double():
+            return
+        if (scene or self._main_scene) is not self.plot.scene():
             return
         x = self.plot.vb.mapSceneToView(ev.scenePos()).x()
         t_start, t_end = self.current_range()
@@ -175,13 +182,16 @@ class PanelSplitter(QtWidgets.QGraphicsObject):
 class GraphDropTarget(QtCore.QObject):
     """
     Dépôt sur le graphique de voies glissées depuis un arbre (GRAPH_SIGNALS_MIME) :
-    numéro du graphique visé, ou nouveau graphique sous le dernier.
+    numéro du graphique visé, ou nouveau graphique sous le dernier. Dans la fenêtre d'un
+    graphique détaché (panel), toujours ce graphique.
     """
 
-    def __init__(self, graph_ctrl):
-        super().__init__(graph_ctrl)
+    def __init__(self, graph_ctrl, view=None, panel=None):
+        super().__init__(view if view is not None else graph_ctrl)
         self.graph_ctrl = graph_ctrl
-        view = graph_ctrl.graph
+        self.panel = panel
+        view = view if view is not None else graph_ctrl.graph
+        self.view = view
         view.setAcceptDrops(True)
         view.viewport().setAcceptDrops(True)
         view.viewport().installEventFilter(self)
@@ -192,21 +202,29 @@ class GraphDropTarget(QtCore.QObject):
                         QtCore.QEvent.Type.Drop, QtCore.QEvent.Type.DragLeave):
             return False
         if kind == QtCore.QEvent.Type.DragLeave:
-            self.graph_ctrl.show_drop_target(None)
+            self._show(None)
             return False
         if not event.mimeData().hasFormat(GRAPH_SIGNALS_MIME):
             return False
-        number = self.graph_ctrl.graph_number_at(
-                        self.graph_ctrl.graph.mapToScene(event.position().toPoint()))
+        if self.panel is not None:
+            number = self.graph_ctrl.number_of_panel(self.panel)
+        else:
+            number = self.graph_ctrl.graph_number_at(
+                            self.view.mapToScene(event.position().toPoint()))
         if kind == QtCore.QEvent.Type.Drop:
-            self.graph_ctrl.show_drop_target(None)
+            self._show(None)
             ids = bytes(event.mimeData().data(GRAPH_SIGNALS_MIME)).decode().split(",")
             self.graph_ctrl.signals_dropped.emit(ids, number)
         else:
-            self.graph_ctrl.show_drop_target(number)
+            self._show(number)
         event.setDropAction(QtCore.Qt.DropAction.LinkAction)
         event.accept()
         return True
+
+    def _show(self, number):
+        # cadre du graphique visé : fenêtre principale seulement
+        if self.panel is None:
+            self.graph_ctrl.show_drop_target(number)
 
 
 class GraphController(QtCore.QObject):
@@ -249,6 +267,8 @@ class GraphController(QtCore.QObject):
         # contenir plus de valeurs que de graphiques affichés (projet relu)
         self._heights = []
         self._splitters = []
+        # texte affiché à la place des graphiques quand ils sont tous détachés
+        self._placeholder = None
 
         self.old_highlight          = None
         self.reference_sig          = None
@@ -294,10 +314,15 @@ class GraphController(QtCore.QObject):
         # position (scene) du dernier clic droit dans le graphique : position des actions
         # du menu contextuel (ex: ajout de texte)
         self._context_scene_pos = None
+        self._context_scene = None
         self.plot.scene().sigMouseClicked.connect(self._remember_context_click)
         # voies glissées depuis un arbre
         self._drop_frame = None
         self.drop_target = GraphDropTarget(self)
+        # fenêtre principale fermée : graphiques détachés réintégrés (fenêtres fermées)
+        main_window = self.graph.window()
+        if hasattr(main_window, "closing"):
+            main_window.closing.connect(self.attach_all)
 
     # option « Missing data > Display » (Options > Graph settings)
     MISSING_GAP = "Gap in the curve"
@@ -345,11 +370,14 @@ class GraphController(QtCore.QObject):
     def add_panel(self) -> PlotPanel:
         """Nouveau panneau de graphique, sous les précédents, à l'axe des temps commun."""
         panel = PlotPanel(self._display_y, self.opts)
-        self.graph.addItem(panel.plot, row=len(self.panels), col=0)
+        # dernier des graphiques de la fenêtre principale
+        self._show_placeholder(False)
+        self.graph.addItem(panel.plot, row=len(self.attached_panels()), col=0)
         if self.panels:
             panel.vb.setXLink(self.main_panel.vb)
             if getattr(self, "menu", None) is not None:
                 self._share_menu(panel)
+        self._add_detach_action(panel)
         self.panels.append(panel)
         panel.plot.geometryChanged.connect(self._place_splitters)
         self._layout_panels()
@@ -378,9 +406,16 @@ class GraphController(QtCore.QObject):
         self.graph_tree_ctrl.set_graph(self.active_panel.plot)
         panel.plot.geometryChanged.disconnect(self._place_splitters)
         panel.dispose()
-        self.graph.removeItem(panel.plot)
-        # ligne vide de la mise en page : plus de place réservée
-        self.graph.ci.layout.setRowStretchFactor(len(self.panels), 0)
+        if panel.window is not None:
+            # graphique détaché devenu vide : sa fenêtre est fermée
+            window, panel.window = panel.window, None
+            window.view.removeItem(panel.plot)
+            self._release_scene(window.view.scene())
+            window.close_silently()
+            window.deleteLater()
+        else:
+            self.graph.removeItem(panel.plot)
+        self._reset_free_rows()
         self._layout_panels()
 
     @property
@@ -408,17 +443,147 @@ class GraphController(QtCore.QObject):
         Titre de l'axe des temps sous le dernier panneau seulement, hauteurs des panneaux,
         une poignée entre deux panneaux.
         """
+        attached = self.attached_panels()
         for panel in self.panels:
-            panel.xp_axis.showLabel(panel is self.panels[-1])
+            # graphique détaché : titre de l'axe des temps dans sa fenêtre
+            panel.xp_axis.showLabel(panel.window is not None or panel is attached[-1])
+        self._show_placeholder(not attached)
         self._apply_heights()
         scene = self.graph.scene()
-        while len(self._splitters) > len(self.panels) - 1:
+        count = max(len(attached) - 1, 0)
+        while len(self._splitters) > count:
             scene.removeItem(self._splitters.pop())
-        while len(self._splitters) < len(self.panels) - 1:
+        while len(self._splitters) < count:
             splitter = PanelSplitter(self, len(self._splitters))
             scene.addItem(splitter)
             self._splitters.append(splitter)
         self._place_splitters()
+
+    # ---------------- graphiques détachés ----------------
+
+    def attached_panels(self) -> list:
+        """Graphiques de la fenêtre principale, dans l'ordre."""
+        return [panel for panel in self.panels if panel.window is None]
+
+    def _add_detach_action(self, panel):
+        """Menu contextuel du graphique : « Détacher » / « Réintégrer »."""
+        menu = panel.vb.menu
+        menu.addSeparator()
+        panel.detach_action = QtGui.QAction("Detach graph", menu)
+        panel.detach_action.triggered.connect(lambda _=False, p=panel: self.toggle_detach(p))
+        menu.addAction(panel.detach_action)
+
+    def toggle_detach(self, panel):
+        if panel.window is None:
+            self.detach_panel(panel)
+        else:
+            self.attach_panel(panel)
+
+    def detach_panel(self, panel):
+        """
+        Graphique déplacé dans sa propre fenêtre (le graphique principal aussi : la
+        fenêtre principale affiche alors un texte à la place des graphiques).
+        """
+        if panel not in self.panels or panel.window is not None:
+            return
+        number = self.number_of_panel(panel)
+        self.graph.removeItem(panel.plot)
+        window = DetachedGraphWindow(panel, f"Graph {number} - GLviewer", self.graph.window())
+        panel.window = window
+        window.view.addItem(panel.plot, row=0, col=0)
+        self._connect_scene(window.view.scene())
+        GraphDropTarget(self, window.view, panel)
+        window.closed.connect(self.attach_panel)
+        panel.detach_action.setText("Reattach graph")
+        self._relayout()
+        self._apply_theme()
+        window.show()
+
+    def attach_panel(self, panel):
+        """Graphique détaché réintégré à sa place dans la fenêtre principale."""
+        window = panel.window
+        if window is None:
+            return
+        panel.window = None
+        window.closed.disconnect(self.attach_panel)
+        old_scene = window.view.scene()
+        window.view.removeItem(panel.plot)
+        # fermeture déjà en cours (croix de la fenêtre) : sans effet
+        window.close_silently()
+        panel.detach_action.setText("Detach graph")
+        self._relayout()
+        self._apply_theme()
+        # tracé de retour dans la fenêtre principale : ses textes oublient la scène de la
+        # fenêtre, détruite ensuite
+        self._release_scene(old_scene)
+        window.deleteLater()
+
+    def _release_scene(self, scene):
+        """
+        Textes (annotations, étiquettes des curseurs...) détachés de la scène d'une
+        fenêtre qui va être détruite, où qu'ils soient maintenant (fenêtre principale,
+        autre fenêtre détachée). pyqtgraph (TextItem.paint) se déconnecte de la scène
+        précédente au dessin suivant : si elle est déjà détruite, erreur.
+        """
+        scenes = {id(s): s for s in [self.graph.scene(), scene] + [
+                    p.window.view.scene() for p in self.panels if p.window is not None]}
+        items = [item for living in scenes.values() for item in living.items()]
+        # curseurs des outils graphiques masqués : hors de toute scène
+        tools = self.graph_tree_ctrl
+        for tool_item in (tools.mouseCursor.cursors + [tools.mouseCursor.valtext]
+                          + tools.cursors_H.cursors + tools.cursors_V.cursors):
+            items += [tool_item] + tool_item.childItems()
+        for item in items:
+            if (not isinstance(item, pg.TextItem)
+                    or getattr(item, "_lastScene", None) is not scene):
+                continue
+            try:
+                scene.sigPrepareForPaint.disconnect(item.updateTransform)
+            except (TypeError, RuntimeError):
+                pass
+            item._lastScene = None
+
+    def attach_all(self):
+        """Tous les graphiques réintégrés (fermeture de la fenêtre principale)."""
+        for panel in list(self.panels):
+            self.attach_panel(panel)
+
+    def _relayout(self):
+        """Graphiques de la fenêtre principale replacés dans l'ordre de leur numéro."""
+        layout = self.graph.ci
+        self._show_placeholder(False)
+        for panel in self.panels:
+            if panel.plot in layout.items:
+                layout.removeItem(panel.plot)
+        for row, panel in enumerate(self.attached_panels()):
+            layout.addItem(panel.plot, row=row, col=0)
+        self._reset_free_rows()
+        self._layout_panels()
+
+    def _reset_free_rows(self):
+        """Lignes de la mise en page sans graphique : plus de place réservée."""
+        layout = self.graph.ci.layout
+        for row in range(len(self.attached_panels()), len(self.panels) + 2):
+            layout.setRowStretchFactor(row, 0)
+
+    def _show_placeholder(self, show: bool):
+        """Texte à la place des graphiques quand ils sont tous détachés."""
+        layout = self.graph.ci
+        if show and self._placeholder is None:
+            self._placeholder = pg.LabelItem(
+                    "All graphs are detached: close their window to bring them back here",
+                    color=theme.colors()["muted"])
+            layout.addItem(self._placeholder, row=0, col=0)
+        elif not show and self._placeholder is not None:
+            layout.removeItem(self._placeholder)
+            self._placeholder = None
+
+    def _connect_scene(self, scene):
+        """Souris dans la scène d'une fenêtre détachée : comme dans la fenêtre principale."""
+        scene.sigMouseMoved.connect(lambda pos, s=scene: self._on_mouse_moved((pos,), s))
+        scene.sigMouseClicked.connect(lambda ev, s=scene: self._remember_context_click(ev, s))
+        scene.sigMouseClicked.connect(
+                lambda ev, s=scene: self.range_picker._on_mouse_clicked(ev, s))
 
     # ---------------- hauteur des graphiques ----------------
 
@@ -449,29 +614,48 @@ class GraphController(QtCore.QObject):
         la place disponible est répartie exactement selon ces proportions.
         """
         layout = self.graph.ci.layout
-        for row, (panel, ratio) in enumerate(zip(self.panels, self.heights())):
-            panel.plot.setPreferredHeight(60 * ratio)
-            layout.setRowStretchFactor(row, max(1, int(round(1000 * ratio))))
+        ratios = dict(zip(self.panels, self.heights()))
+        attached = self.attached_panels()
+        if attached:
+            mean = sum(ratios[panel] for panel in attached) / len(attached)
+            for row, panel in enumerate(attached):
+                ratio = ratios[panel] / mean
+                panel.plot.setPreferredHeight(60 * ratio)
+                layout.setRowStretchFactor(row, max(1, int(round(1000 * ratio))))
         layout.invalidate()
 
     def drag_splitter(self, index: int, scene_y: float):
-        """Limite entre les graphiques index et index + 1 amenée à l'ordonnée scene_y."""
-        upper, lower = self.panels[index], self.panels[index + 1]
-        rects = [panel.plot.sceneBoundingRect() for panel in self.panels]
+        """
+        Limite entre les graphiques index et index + 1 de la fenêtre principale amenée à
+        l'ordonnée scene_y.
+        """
+        attached = self.attached_panels()
+        rects = [panel.plot.sceneBoundingRect() for panel in attached]
         pixels = [rect.height() for rect in rects]
         pair = pixels[index] + pixels[index + 1]
         top = rects[index].top()
         minimum = min(self.MIN_PANEL_HEIGHT, pair / 2)
         pixels[index] = min(max(scene_y - top, minimum), pair - minimum)
         pixels[index + 1] = pair - pixels[index]
-        self._heights = pixels + self._heights[len(pixels):]
+        # pixels convertis dans l'unité des hauteurs relatives (graphiques détachés
+        # compris, qui gardent la leur)
+        heights = self.heights() + self._heights[len(self.panels):]
+        scale = sum(heights[self.panels.index(p)] for p in attached) / sum(
+                    rect.height() for rect in rects)
+        for panel, value in zip(attached, pixels):
+            heights[self.panels.index(panel)] = value * scale
+        self._heights = heights
         self._apply_heights()
 
     def _place_splitters(self):
         """Poignées entre les graphiques (après une modification de la mise en page)."""
+        attached = self.attached_panels()
         for splitter in self._splitters:
-            upper = self.panels[splitter.index].plot.sceneBoundingRect()
-            lower = self.panels[splitter.index + 1].plot.sceneBoundingRect()
+            if splitter.index + 1 >= len(attached):
+                # graphique détaché à l'instant : poignée retirée par _layout_panels
+                continue
+            upper = attached[splitter.index].plot.sceneBoundingRect()
+            lower = attached[splitter.index + 1].plot.sceneBoundingRect()
             middle = (upper.bottom() + lower.top()) / 2
             height = PanelSplitter.HEIGHT
             splitter.place(QtCore.QRectF(upper.left(), middle - height / 2,
@@ -506,13 +690,19 @@ class GraphController(QtCore.QObject):
         Graphique visé par un dépôt : celui sous le point (axes compris) ; sous le dernier
         graphique, un nouveau (dans la limite de MAX_GRAPHS).
         """
-        for number, panel in enumerate(self.panels, start=1):
+        attached = self.attached_panels()
+        new_graph = min(len(self.panels) + 1, MAX_GRAPHS)
+        if not attached:
+            # tous les graphiques sont détachés : nouveau graphique
+            return new_graph
+        for panel in attached:
             if panel.plot.sceneBoundingRect().contains(scene_pos):
-                return number
-        last = self.panels[-1].plot.sceneBoundingRect()
-        if scene_pos.y() > last.bottom():
-            return min(len(self.panels) + 1, MAX_GRAPHS)
-        return 1 if scene_pos.y() < self.main_panel.plot.sceneBoundingRect().top()                else len(self.panels)
+                return self.number_of_panel(panel)
+        if scene_pos.y() > attached[-1].plot.sceneBoundingRect().bottom():
+            return new_graph
+        first = attached[0]
+        return self.number_of_panel(
+                first if scene_pos.y() < first.plot.sceneBoundingRect().top() else attached[-1])
 
     def show_drop_target(self, number: int | None):
         """Cadre sur le graphique visé pendant un glisser (None : retiré)."""
@@ -528,12 +718,15 @@ class GraphController(QtCore.QObject):
         if number is None:
             self._drop_frame.hide()
             return
-        if number <= len(self.panels):
+        attached = self.attached_panels()
+        if number <= len(self.panels) and self.panels[number - 1] in attached:
             rect = self.panels[number - 1].plot.sceneBoundingRect()
-        else:
+        elif attached:
             # nouveau graphique : bande sous le dernier
-            last = self.panels[-1].plot.sceneBoundingRect()
+            last = attached[-1].plot.sceneBoundingRect()
             rect = QtCore.QRectF(last.left(), last.bottom() - 30, last.width(), 30)
+        else:
+            rect = self.graph.ci.sceneBoundingRect()
         self._drop_frame.setRect(rect)
         self._drop_frame.show()
 
@@ -593,16 +786,26 @@ class GraphController(QtCore.QObject):
         """Panneau où la courbe de sig est tracée."""
         return next((panel for panel in self.panels if sig in panel.curves), None)
 
-    def panel_at(self, scene_pos) -> PlotPanel | None:
-        """Panneau sous un point de l'écran (coordonnées de la scène)."""
-        return next((panel for panel in self.panels if panel.contains(scene_pos)), None)
+    def panel_at(self, scene_pos, scene=None) -> PlotPanel | None:
+        """
+        Panneau sous un point de l'écran (coordonnées de la scène scene : par défaut celle
+        de la fenêtre principale, sinon celle d'un graphique détaché).
+        """
+        scene = scene or self.graph.scene()
+        return next((panel for panel in self.panels
+                     if panel.plot.scene() is scene and panel.contains(scene_pos)), None)
 
     def _apply_theme(self):
         """Fond (option « Graph Background color » ou celui du thème), axes et textes."""
         dark = theme.is_dark(self.opts.get("dark_mode", False))
-        self.graph.setBackground(theme.graph_background(self.opts["background_color"], dark))
+        background = theme.graph_background(self.opts["background_color"], dark)
+        self.graph.setBackground(background)
         for panel in self.panels:
             panel.apply_theme(dark)
+            if panel.window is not None:
+                panel.window.view.setBackground(background)
+        if self._placeholder is not None:
+            self._placeholder.setText(self._placeholder.text, color=theme.colors(dark)["muted"])
         if getattr(self, "graph_tree_ctrl", None) is not None:
             self.graph_tree_ctrl.apply_theme(dark)
 
@@ -799,10 +1002,10 @@ class GraphController(QtCore.QObject):
             # clic hors graphe
             self._mouse_active = False
 
-    def _on_mouse_moved(self, ev):
+    def _on_mouse_moved(self, ev, scene=None):
         # Garde 2: souris sur le viewbox ?
         pos = ev[0]
-        panel = self.panel_at(pos)
+        panel = self.panel_at(pos, scene)
         if panel is not None:
 
             mousePoint = panel.vb.mapSceneToView(pos)
@@ -860,28 +1063,30 @@ class GraphController(QtCore.QObject):
     # décalage (pixels) du texte d'une annotation par rapport au point annoté
     ANNOTATION_OFFSET = QtCore.QPointF(30, -30)
 
-    def _remember_context_click(self, ev):
+    def _remember_context_click(self, ev, scene=None):
         """Mémorise la position du clic droit (ouverture du menu contextuel)."""
         if (ev.button() == QtCore.Qt.MouseButton.RightButton and
-                self.panel_at(ev.scenePos()) is not None):
+                self.panel_at(ev.scenePos(), scene) is not None):
             self._context_scene_pos = QtCore.QPointF(ev.scenePos())
+            self._context_scene = scene
 
     def nearest_sample(self, sig, scene_pos: QtCore.QPointF) -> tuple[float, float] | None:
         """Échantillon de sig le plus proche d'un point de l'écran (PlotPanel.nearest_sample)."""
         return (self.panel_of(sig) or self.main_panel).nearest_sample(sig, scene_pos)
 
-    def add_text_annotation(self, scene_pos: QtCore.QPointF | None = None):
+    def add_text_annotation(self, scene_pos: QtCore.QPointF | None = None, scene=None):
         """
         Ajoute un texte à la position du clic droit (scene_pos par défaut). Si une courbe
         visible est sélectionnée, le texte annote son échantillon le plus proche du clic :
         il est relié par une flèche et prérempli avec la valeur de l'échantillon.
         """
         if scene_pos is None:
-            scene_pos = self._context_scene_pos
+            scene_pos, scene = self._context_scene_pos, self._context_scene
         if scene_pos is None:
             scene_pos = self.main_panel.vb.sceneBoundingRect().center()
-        # texte placé dans le panneau du clic
-        panel = self.panel_at(scene_pos) or self.main_panel
+            scene = self.main_panel.plot.scene()
+        # texte placé dans le panneau du clic (fenêtre principale ou graphique détaché)
+        panel = self.panel_at(scene_pos, scene) or self.main_panel
         vb = panel.vb
         graph = self.number_of_panel(panel)
 

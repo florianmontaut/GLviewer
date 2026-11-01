@@ -736,3 +736,249 @@ def test_undo_updates_parameter_tree(ctrl, files, qapp):
     _undo(ctrl)
     qapp.processEvents()
     assert ctrl.param_ctrl.param.child("Graph").value() == 1
+
+
+# ---------------- graphiques détachés ----------------
+
+def _rows(graph):
+    """Tracés de la fenêtre principale, ligne par ligne."""
+    layout = graph.graph.ci
+    return [layout.getItem(row, 0) for row in range(len(graph.panels) + 1)]
+
+
+def test_detach_and_reattach_at_same_place(ctrl, three_panels, qapp):
+    graph = three_panels
+    p1, p2, p3 = graph.panels
+    graph.detach_panel(p2)
+    qapp.processEvents()
+    window = p2.window
+    assert window is not None and window.isVisible()
+    assert window.view.ci.getItem(0, 0) is p2.plot
+    assert _rows(graph)[:3] == [p1.plot, p3.plot, None]
+    assert graph.attached_panels() == [p1, p3]
+    assert len(graph._splitters) == 1
+    assert p2.xp_axis.label.isVisible() and p3.xp_axis.label.isVisible()
+    assert not p1.xp_axis.label.isVisible()
+    assert p2.detach_action.text() == "Reattach graph"
+    assert window.windowTitle().startswith("Graph 2")
+    # le graphique détaché garde son numéro, ses courbes et l'axe des temps commun
+    assert graph.number_of_panel(p2) == 2 and p2.curves
+    assert p2.vb.linkedView(p2.vb.XAxis) is p1.vb
+
+    # fermeture de la fenêtre : graphique réintégré à sa place (entre 1 et 3)
+    window.close()
+    qapp.processEvents()
+    assert p2.window is None
+    assert _rows(graph)[:3] == [p1.plot, p2.plot, p3.plot]
+    assert len(graph._splitters) == 2
+    assert p2.detach_action.text() == "Detach graph"
+    heights = _pixel_heights(graph, qapp)
+    assert max(heights) - min(heights) < 3
+
+
+def test_detach_action_in_menu_toggles(ctrl, three_panels, qapp):
+    graph = three_panels
+    p3 = graph.panels[2]
+    assert p3.detach_action in p3.vb.menu.actions()
+    p3.detach_action.trigger()
+    assert p3.window is not None
+    p3.detach_action.trigger()                      # « Reattach graph »
+    assert p3.window is None and _rows(graph)[2] is p3.plot
+
+
+def test_detach_only_graph_shows_placeholder(ctrl, files, qapp):
+    graph = ctrl.graph_ctrl
+    ctrl.view.resize(1400, 900)
+    ctrl.view.show()
+    main = graph.main_panel
+    graph.detach_panel(main)
+    qapp.processEvents()
+    assert graph.attached_panels() == []
+    assert graph._placeholder is not None
+    assert graph.graph.ci.getItem(0, 0) is graph._placeholder
+    assert not graph._splitters
+    # le graphique principal reste le graphique 1 (plot, vb, curves)
+    assert graph.plot is main.plot and main.window.view.ci.getItem(0, 0) is main.plot
+    graph.update_vbox()
+
+    # dépôt dans la fenêtre principale vide : nouveau graphique
+    last = graph.graph.ci.sceneBoundingRect().center()
+    assert graph.graph_number_at(last) == 2
+    graph.signals_dropped.emit([files[1].signals[0].id], 2)
+    assert graph._placeholder is None and graph.attached_panels() == [graph.panels[1]]
+    assert graph.graph.ci.getItem(0, 0) is graph.panels[1].plot
+
+    # retour du graphique principal : au-dessus du graphique 2
+    main.window.close()
+    qapp.processEvents()
+    assert _rows(graph)[:2] == [main.plot, graph.panels[1].plot]
+
+
+def test_detached_panel_receives_curves_and_is_removed_when_empty(ctrl, three_panels, files,
+                                                                  qapp):
+    graph = three_panels
+    p3 = graph.panels[2]
+    graph.detach_panel(p3)
+    window = p3.window
+    _set_graph(ctrl, files[0].signals[0], 3)
+    assert graph.panel_of(files[0].signals[0]) is p3
+    # graphique 3 vidé : retiré, sa fenêtre fermée (sans réintégration)
+    _set_graph(ctrl, files[0].signals[0], 1)
+    _set_graph(ctrl, files[1].signals[1], 1)
+    qapp.processEvents()
+    from PyQt6 import sip
+    assert len(graph.panels) == 2 and p3 not in graph.panels
+    assert sip.isdeleted(window) or not window.isVisible()
+    assert graph.attached_panels() == graph.panels
+
+
+def test_mouse_and_text_in_detached_window(ctrl, three_panels, files, qapp):
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    p2.window.resize(900, 500)
+    qapp.processEvents()
+    scene = p2.window.view.scene()
+    center = p2.vb.sceneBoundingRect().center()
+    assert graph.panel_at(center, scene) is p2
+    assert graph.panel_at(center) is not p2          # même point, fenêtre principale
+
+    # survol : le curseur souris passe dans la fenêtre détachée
+    graph._on_mouse_moved((center,), scene)
+    assert graph._mouse_panel is p2
+
+    # texte au clic droit dans la fenêtre détachée
+    sig = files[0].signals[1]
+    graph.highlight(sig)
+    text = graph.add_text_annotation(center, scene)
+    text.window.reject()
+    assert text.plotItem is p2.plot
+    [annotation] = graph.graph_tree_ctrl.annotations()
+    assert annotation.graph == 2
+
+
+def test_drop_in_detached_window(ctrl, three_panels, files, qapp):
+    from PyQt6 import QtGui
+    from model.base_objects import graph_signals_mime
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    qapp.processEvents()
+    view = p2.window.view
+    data = graph_signals_mime([files[0].signals[0]])
+    pos = QtCore.QPoint(50, 50)
+    args = (QtCore.Qt.DropAction.LinkAction, data, QtCore.Qt.MouseButton.LeftButton,
+            QtCore.Qt.KeyboardModifier.NoModifier)
+    qapp.sendEvent(view.viewport(), QtGui.QDragEnterEvent(pos, *args))
+    qapp.sendEvent(view.viewport(), QtGui.QDropEvent(QtCore.QPointF(pos), *args))
+    assert files[0].signals[0].graph_number == 2
+
+
+def test_range_picker_in_detached_panel(ctrl, three_panels, files, qapp):
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    sig = files[0].signals[1]
+    graph.start_range_selection(sig)
+    assert graph.range_picker.region.getViewBox() is p2.vb
+    graph.range_picker.cancel()
+
+
+def test_main_window_close_reattaches(ctrl, three_panels, qapp):
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    window = p2.window
+    ctrl.view.close()
+    qapp.processEvents()
+    from PyQt6 import sip
+    assert p2.window is None and (sip.isdeleted(window) or not window.isVisible())
+
+
+def test_theme_applied_to_detached_window(ctrl, three_panels, qapp):
+    from ressources import theme
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    graph.updateOptions({"dark_mode": True})
+    expected = pg_color(theme.graph_background(graph.opts["background_color"], True))
+    assert p2.window.view.backgroundBrush().color().name() == expected
+
+
+def pg_color(value):
+    import pyqtgraph as pg
+    return pg.mkColor(value).name()
+
+
+def test_detached_panel_keeps_same_time_range(ctrl, three_panels, qapp):
+    """Fenêtre détachée (autre position, autre largeur) : même plage de temps."""
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    p2.window.resize(600, 300)
+    p2.window.move(0, 0)
+    qapp.processEvents()
+    graph.main_panel.vb.setXRange(100, 300, padding=0)
+    qapp.processEvents()
+    assert p2.vb.viewRange()[0] == pytest.approx([100, 300])
+    # et inversement : zoom dans la fenêtre détachée
+    p2.vb.setXRange(50, 150, padding=0)
+    qapp.processEvents()
+    assert graph.main_panel.vb.viewRange()[0] == pytest.approx([50, 150], abs=1)
+
+
+def test_text_survives_reattach(ctrl, three_panels, files, qapp):
+    """
+    Texte avec flèche ajouté dans une fenêtre détachée, puis fenêtre fermée : le texte
+    revient dans la fenêtre principale sans erreur au dessin (pyqtgraph se déconnectait
+    de la scène de la fenêtre, déjà détruite).
+    """
+    from PyQt6 import sip
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    p2.window.resize(900, 500)
+    qapp.processEvents()
+    scene = p2.window.view.scene()
+    graph.highlight(files[0].signals[1])
+    text = graph.add_text_annotation(p2.vb.sceneBoundingRect().center(), scene)
+    text.window.reject()
+    p2.window.grab()                                # dessiné dans la fenêtre détachée
+    assert text._lastScene is scene
+    window = p2.window
+    window.close()
+    # fenêtre détruite (deleteLater) AVANT que le texte soit redessiné
+    sip.delete(window)
+    graph.graph.grab()                              # dessiné dans la fenêtre principale
+    assert text.scene() is graph.graph.scene()
+    assert text._lastScene is graph.graph.scene()
+
+
+def test_cursor_labels_survive_detached_panel_removal(ctrl, three_panels, files, qapp):
+    """
+    Valeur du curseur souris affichée dans un graphique détaché, puis ce graphique vidé
+    (retiré, fenêtre détruite) : pas d'erreur au dessin suivant.
+    """
+    from PyQt6 import sip
+    graph = three_panels
+    cursor = graph.graph_tree_ctrl.mouseCursor
+    cursor.param('show cursors').setValue(True)
+    cursor.param('show X value').setValue(True)
+    p3 = graph.panels[2]
+    graph.detach_panel(p3)
+    window = p3.window
+    window.resize(900, 500)
+    qapp.processEvents()
+    # souris dans la fenêtre détachée : curseur et valeur y sont dessinés
+    graph._on_mouse_moved((p3.vb.sceneBoundingRect().center(),), window.view.scene())
+    graph._update_cursor(100.0, None)
+    window.grab()
+    assert cursor.valtext._lastScene is window.view.scene()
+    _set_graph(ctrl, files[1].signals[1], 1)        # graphique 3 vidé : retiré
+    if not sip.isdeleted(window):
+        sip.delete(window)
+    graph._mouse_panel = graph.main_panel
+    graph._update_cursor(100.0, None)
+    graph.graph.grab()
+    qapp.processEvents()
+    assert cursor.valtext._lastScene is graph.graph.scene()

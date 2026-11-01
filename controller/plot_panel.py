@@ -87,6 +87,27 @@ class AdaptiveAxisItem(pg.AxisItem):
         return super().tickSpacing(minVal, maxVal, size)
 
 
+class PanelViewBox(pg.ViewBox):
+    """
+    ViewBox d'un panneau. Axe des temps lié à celui du panneau principal : pyqtgraph
+    aligne les vues liées selon leur position À L'ÉCRAN, ce qui convient aux panneaux
+    empilés d'une même fenêtre, mais décale la plage d'un graphique détaché (autre
+    fenêtre, autre largeur) : celle-ci est alors simplement recopiée.
+    """
+
+    def linkedViewChanged(self, view, axis):
+        if (axis != self.XAxis or view is None or self.linksBlocked
+                or view.scene() is self.scene()):
+            return super().linkedViewChanged(view, axis)
+        (x0, x1), _ = view.viewRange()
+        view.blockLink(True)
+        try:
+            self.enableAutoRange(self.XAxis, False)
+            self.setXRange(x0, x1, padding=0)
+        finally:
+            view.blockLink(False)
+
+
 def curve_unit(sig) -> str:
     """Unité d'une courbe (« °C », « W »...) : chaque unité a son échelle verticale."""
     return str(getattr(sig, "unit", "") or "").strip()
@@ -169,14 +190,19 @@ class PlotPanel:
     def __init__(self, display_y, opts: dict):
         self.display_y = display_y
         self.opts = opts
+        # fenêtre du graphique détaché (None : dans la fenêtre principale) et action
+        # « Detach graph » de son menu contextuel (voir GraphController.detach_panel)
+        self.window = None
+        self.detach_action = None
         self.curves = {}                # SignalObject -> SignalCurveItem
         self.main_unit = None           # unité de l'axe de gauche
         self.scales = {}                # unité secondaire -> UnitScale (ordre des axes)
         self._extra_axes = []           # axes à droite au-delà du premier
         self._dark = None
         self.time_axis = RelativeTimeAxis(orientation='bottom')
-        self.plot = pg.PlotItem(None, axisItems={"bottom": self.time_axis,
-                                                 "left": AdaptiveAxisItem('left')})
+        self.plot = pg.PlotItem(None, viewBox=PanelViewBox(),
+                                axisItems={"bottom": self.time_axis,
+                                           "left": AdaptiveAxisItem('left')})
         self.vb = self.plot.vb
         # seuls les points visibles (plus une marge) sont décimés et dessinés : sans cela,
         # zoomer réduit la décimation sur TOUTE la courbe (1 million de points redessinés
