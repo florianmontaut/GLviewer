@@ -650,3 +650,89 @@ def test_mouse_drag_on_splitter(three_panels, qapp):
     after = _pixel_heights(graph, qapp)
     assert after[0] == pytest.approx(before[0] + 80, abs=4)
     assert graph.main_panel.vb.viewRange()[0] == pytest.approx(x_range)
+
+
+# ---------------- annulation (Ctrl+Z) d'un changement de graphique ----------------
+
+def _undo(ctrl):
+    ctrl.workspace_ctrl.undo_stack.undo()
+
+
+def _redo(ctrl):
+    ctrl.workspace_ctrl.undo_stack.redo()
+
+
+def test_undo_signal_graph_change(ctrl, files):
+    graph = ctrl.graph_ctrl
+    sig = files[0].signals[0]
+    stack = ctrl.workspace_ctrl.undo_stack
+    count = stack.count()
+    _set_graph(ctrl, sig, 2)
+    assert stack.count() == count + 1 and stack.undoText() == "Move to graph 2"
+    _undo(ctrl)
+    assert sig.graph_number == 1 and len(graph.panels) == 1
+    assert graph.panel_of(sig) is graph.main_panel
+    _redo(ctrl)
+    assert sig.graph_number == 2 and graph.panel_of(sig) is graph.panels[1]
+
+
+def test_other_signal_params_not_in_graph_command(ctrl, files):
+    """Seul le graphique est annulable : modifier l'unité n'ajoute pas d'étape."""
+    stack = ctrl.workspace_ctrl.undo_stack
+    count = stack.count()
+    _set_unit(ctrl, files[0].signals[0], "W")
+    assert stack.count() == count
+
+
+def test_undo_file_graph_change_restores_each_channel(ctrl, files):
+    from ressources.custom_items import itemType
+    graph = ctrl.graph_ctrl
+    _set_graph(ctrl, files[0].signals[1], 3)
+    _set_container_graph(ctrl, files[0], itemType.FILE, 2)
+    assert [s.graph_number for s in files[0].signals] == [2, 2]
+    _undo(ctrl)                                     # un seul Ctrl+Z pour le fichier
+    assert [s.graph_number for s in files[0].signals] == [1, 3]
+    assert len(graph.panels) == 3
+
+
+def test_undo_group_graph_change(ctrl, files, monkeypatch):
+    from ressources.custom_items import itemType
+    monkeypatch.setattr(ctrl, "_ask_group_name", lambda title, default: "Sinus")
+    key = next(g.key for g in ctrl.channel_model.groups() if g.name == "CH2")
+    ctrl.edit_channel_groups("new", [key])
+    [group] = ctrl.workspace.channel_groups
+    _set_container_graph(ctrl, group, itemType.CHANNEL_GROUP, 2)
+    assert [s.graph_number for s in group.signals] == [2, 2]
+    _undo(ctrl)
+    assert [s.graph_number for s in group.signals] == [1, 1]
+    assert ctrl.workspace.channel_groups == [group]     # le groupe, lui, reste
+
+
+def test_mixed_value_pushes_nothing(ctrl, files):
+    from ressources.custom_items import itemType
+    _set_graph(ctrl, files[0].signals[1], 2)
+    stack = ctrl.workspace_ctrl.undo_stack
+    count = stack.count()
+    _set_container_graph(ctrl, files[0], itemType.FILE, 0)
+    assert stack.count() == count
+
+
+def test_undo_drop(ctrl, files):
+    graph = ctrl.graph_ctrl
+    graph.signals_dropped.emit([s.id for s in files[1].signals], 2)
+    assert [s.graph_number for s in files[1].signals] == [2, 2]
+    _undo(ctrl)
+    assert [s.graph_number for s in files[1].signals] == [1, 1]
+    assert len(graph.panels) == 1
+
+
+def test_undo_updates_parameter_tree(ctrl, files, qapp):
+    sig = files[0].signals[0]
+    from ressources.custom_items import SelectionContext, itemType
+    ctrl.select_from_context(SelectionContext(role=itemType.RAW, signal=sig), source="tree")
+    ctrl.param_ctrl.param.child("Graph").setValue(2)
+    qapp.processEvents()
+    assert sig.graph_number == 2
+    _undo(ctrl)
+    qapp.processEvents()
+    assert ctrl.param_ctrl.param.child("Graph").value() == 1

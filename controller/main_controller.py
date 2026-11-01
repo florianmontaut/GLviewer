@@ -28,6 +28,7 @@ from controller.commands.annotations import (AddAnnotationCommand, RemoveAnnotat
                                              ModifyAnnotationCommand)
 from controller.commands.remove_file import RemoveFileCommand
 from controller.commands.file_params import ModifyFileParamsCommand
+from controller.commands.graph_number import GraphNumberCommand
 from ressources.custom_commands import od_replace
 from controller.channel_tree_controller import ChannelTreeController
 from model.channel_tree_model import ChannelTreeModel
@@ -1175,8 +1176,9 @@ class MainController(QtCore.QObject):
             if number != sig.graph_number:
                 if number > 0:
                     self.set_graph_number(sig.signals, number)
-                # 0 choisi : rien à appliquer, valeur réelle remise dans l'arbre
-                QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
+                else:
+                    # 0 choisi : rien à appliquer, valeur réelle remise dans l'arbre
+                    QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
                 return
         if ctx.role == itemType.CHANNEL_GROUP:
             # groupe de la vue « Par voie » : renommage annulable
@@ -1194,8 +1196,11 @@ class MainController(QtCore.QObject):
                 # paramètres du fichier : annulables (période, décalage, troncatures...)
                 self._modify_file_params(ctx, new_params)
                 return
+            # graphique de la voie : changement annulable (Ctrl+Z), à part
+            number = new_params.pop("graph_number", sig.graph_number)
             sig.set_params(new_params)
             self.graph_ctrl.update_signal(sig)
+            self.set_graph_number([sig], number)
             return
 
         # ActionRequest.index est une POSITION (int) : on la retrouve à partir de l'id
@@ -1470,21 +1475,31 @@ class MainController(QtCore.QObject):
         if not signals:
             return
         self.set_graph_number(signals, number)
-        QtCore.QTimer.singleShot(0, self._update_title)
-        # « Graph » affiché dans le ParameterTree à jour
-        ctx = self.param_ctrl._ctx
-        if ctx is not None and ctx.signal is not None:
-            QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
 
     def set_graph_number(self, signals, number: int):
-        """Voies tracées dans le graphique n° number (la dernière affectation l'emporte)."""
+        """
+        Voies tracées dans le graphique n° number (la dernière affectation l'emporte),
+        annulable en un seul Ctrl+Z (GraphNumberCommand).
+        """
+        moved = [sig for sig in signals if sig.graph_number != number]
+        if moved:
+            self.workspace_ctrl.undo_stack.push(GraphNumberCommand(self, moved, number))
+
+    def _apply_graph_numbers(self, numbers: dict):
+        """Graphique de chaque voie (GraphNumberCommand : exécution et annulation)."""
         self.graph_ctrl.freeze_updates(True)
         try:
-            for sig in signals:
+            for sig, number in numbers.items():
                 sig.graph_number = number
                 self.graph_ctrl.update_signal(sig)
         finally:
             self.graph_ctrl.freeze_updates(False)
+        QtCore.QTimer.singleShot(0, self._update_title)
+        # « Graph » affiché dans le ParameterTree (voie, fichier, groupe) à jour ; différé :
+        # l'arbre peut être à l'origine du changement
+        ctx = self.param_ctrl._ctx
+        if ctx is not None and ctx.signal is not None:
+            QtCore.QTimer.singleShot(0, lambda: self.param_ctrl.load_params(ctx))
 
     def _modify_computed_channel(self, ctx, new_params):
         sig = ctx.signal
