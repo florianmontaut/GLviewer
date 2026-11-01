@@ -115,6 +115,63 @@ class RangePicker(QtCore.QObject):
             QtCore.QTimer.singleShot(0, self.accept)
 
 
+class PanelSplitter(QtWidgets.QGraphicsObject):
+    """
+    Poignée entre deux graphiques empilés (index et index + 1) : glisser pour répartir
+    leur hauteur, double-clic pour donner la même hauteur à tous les graphiques.
+    """
+    HEIGHT = 8
+
+    def __init__(self, graph_ctrl, index: int):
+        super().__init__()
+        self.graph_ctrl = graph_ctrl
+        self.index = index
+        self._rect = QtCore.QRectF()
+        self._hover = False
+        # au-dessus des graphiques : reçoit la souris avant la ViewBox (pas de déplacement
+        # de la vue)
+        self.setZValue(1e5)
+        self.setAcceptHoverEvents(True)
+        self.setAcceptedMouseButtons(QtCore.Qt.MouseButton.LeftButton)
+        self.setCursor(QtCore.Qt.CursorShape.SplitVCursor)
+        self.setToolTip("Glisser : hauteur des graphiques ; double-clic : hauteurs égales")
+
+    def boundingRect(self):
+        return self._rect
+
+    def place(self, rect: QtCore.QRectF):
+        self.prepareGeometryChange()
+        self._rect = rect
+        self.update()
+
+    def paint(self, painter, option, widget=None):
+        if self._hover:
+            color = QtGui.QColor(theme.colors()["accent"])
+            color.setAlpha(90)
+            painter.fillRect(self._rect, color)
+
+    def hoverEnterEvent(self, ev):
+        self._hover = True
+        self.update()
+
+    def hoverLeaveEvent(self, ev):
+        self._hover = False
+        self.update()
+
+    def mousePressEvent(self, ev):
+        ev.accept()
+
+    def mouseMoveEvent(self, ev):
+        self.graph_ctrl.drag_splitter(self.index, ev.scenePos().y())
+
+    def mouseReleaseEvent(self, ev):
+        self.graph_ctrl.heights_changed.emit(self.graph_ctrl.heights())
+
+    def mouseDoubleClickEvent(self, ev):
+        ev.accept()
+        self.graph_ctrl.reset_heights()
+
+
 class GraphDropTarget(QtCore.QObject):
     """
     Dépôt sur le graphique de voies glissées depuis un arbre (GRAPH_SIGNALS_MIME) :
@@ -172,6 +229,8 @@ class GraphController(QtCore.QObject):
     cursor_moved_X          = QtCore.pyqtSignal(float)
     # voies (id) déposées sur le graphique n° (glisser-déposer depuis un arbre)
     signals_dropped         = QtCore.pyqtSignal(list, int)
+    # hauteurs relatives des graphiques réglées par l'utilisateur (poignées)
+    heights_changed         = QtCore.pyqtSignal(list)
     # case « snap to selected signal » du curseur souris (outils graphiques)
     snap_toggled            = QtCore.pyqtSignal(bool)
     menu_actions_triggered  = QtCore.pyqtSignal(    custom_types.ActionModifier,
@@ -186,6 +245,10 @@ class GraphController(QtCore.QObject):
         # graphique actif : celui du dernier signal sélectionné (outils graphiques,
         # recalage dans le temps)
         self._active_panel = None
+        # hauteurs relatives souhaitées des graphiques (1 : hauteur moyenne) ; peut
+        # contenir plus de valeurs que de graphiques affichés (projet relu)
+        self._heights = []
+        self._splitters = []
 
         self.old_highlight          = None
         self.reference_sig          = None
@@ -288,6 +351,7 @@ class GraphController(QtCore.QObject):
             if getattr(self, "menu", None) is not None:
                 self._share_menu(panel)
         self.panels.append(panel)
+        panel.plot.geometryChanged.connect(self._place_splitters)
         self._layout_panels()
         self._apply_theme()
         return panel
@@ -312,8 +376,11 @@ class GraphController(QtCore.QObject):
         if self._active_panel is panel:
             self._active_panel = None
         self.graph_tree_ctrl.set_graph(self.active_panel.plot)
+        panel.plot.geometryChanged.disconnect(self._place_splitters)
         panel.dispose()
         self.graph.removeItem(panel.plot)
+        # ligne vide de la mise en page : plus de place réservée
+        self.graph.ci.layout.setRowStretchFactor(len(self.panels), 0)
         self._layout_panels()
 
     @property
@@ -337,9 +404,78 @@ class GraphController(QtCore.QObject):
             tools.set_graph(self.active_panel.plot)
 
     def _layout_panels(self):
-        """Titre de l'axe des temps sous le dernier panneau seulement."""
+        """
+        Titre de l'axe des temps sous le dernier panneau seulement, hauteurs des panneaux,
+        une poignée entre deux panneaux.
+        """
         for panel in self.panels:
             panel.xp_axis.showLabel(panel is self.panels[-1])
+        self._apply_heights()
+        scene = self.graph.scene()
+        while len(self._splitters) > len(self.panels) - 1:
+            scene.removeItem(self._splitters.pop())
+        while len(self._splitters) < len(self.panels) - 1:
+            splitter = PanelSplitter(self, len(self._splitters))
+            scene.addItem(splitter)
+            self._splitters.append(splitter)
+        self._place_splitters()
+
+    # ---------------- hauteur des graphiques ----------------
+
+    # hauteur minimale d'un graphique pendant le glisser d'une poignée (pixels)
+    MIN_PANEL_HEIGHT = 60
+
+    def heights(self) -> list[float]:
+        """Hauteurs relatives des graphiques affichés (moyenne 1)."""
+        values = self._heights[:len(self.panels)]
+        values += [1.0] * (len(self.panels) - len(values))
+        mean = sum(values) / len(values)
+        return [round(v / mean, 3) for v in values]
+
+    def set_heights(self, heights):
+        """Hauteurs relatives souhaitées (projet relu ; [] : hauteurs égales)."""
+        self._heights = [float(h) for h in (heights or []) if float(h) > 0]
+        self._apply_heights()
+
+    def reset_heights(self):
+        """Même hauteur pour tous les graphiques (double-clic sur une poignée)."""
+        self._heights = []
+        self._apply_heights()
+        self.heights_changed.emit(self.heights())
+
+    def _apply_heights(self):
+        """
+        Hauteur préférée ET facteur d'étirement proportionnels à la hauteur souhaitée :
+        la place disponible est répartie exactement selon ces proportions.
+        """
+        layout = self.graph.ci.layout
+        for row, (panel, ratio) in enumerate(zip(self.panels, self.heights())):
+            panel.plot.setPreferredHeight(60 * ratio)
+            layout.setRowStretchFactor(row, max(1, int(round(1000 * ratio))))
+        layout.invalidate()
+
+    def drag_splitter(self, index: int, scene_y: float):
+        """Limite entre les graphiques index et index + 1 amenée à l'ordonnée scene_y."""
+        upper, lower = self.panels[index], self.panels[index + 1]
+        rects = [panel.plot.sceneBoundingRect() for panel in self.panels]
+        pixels = [rect.height() for rect in rects]
+        pair = pixels[index] + pixels[index + 1]
+        top = rects[index].top()
+        minimum = min(self.MIN_PANEL_HEIGHT, pair / 2)
+        pixels[index] = min(max(scene_y - top, minimum), pair - minimum)
+        pixels[index + 1] = pair - pixels[index]
+        self._heights = pixels + self._heights[len(pixels):]
+        self._apply_heights()
+
+    def _place_splitters(self):
+        """Poignées entre les graphiques (après une modification de la mise en page)."""
+        for splitter in self._splitters:
+            upper = self.panels[splitter.index].plot.sceneBoundingRect()
+            lower = self.panels[splitter.index + 1].plot.sceneBoundingRect()
+            middle = (upper.bottom() + lower.top()) / 2
+            height = PanelSplitter.HEIGHT
+            splitter.place(QtCore.QRectF(upper.left(), middle - height / 2,
+                                         upper.width(), height))
 
     # ---------------- numéro de graphique (paramètre « Graph ») ----------------
 

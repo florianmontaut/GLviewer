@@ -536,3 +536,117 @@ def test_drop_ignores_other_data(ctrl, files, qapp):
                              QtCore.Qt.KeyboardModifier.NoModifier)
     qapp.sendEvent(view.viewport(), event)
     assert all(s.graph_number == 1 for f in files for s in f.signals)
+
+
+# ---------------- hauteur des graphiques ----------------
+
+def _pixel_heights(graph, qapp):
+    qapp.processEvents()
+    return [panel.plot.sceneBoundingRect().height() for panel in graph.panels]
+
+
+@pytest.fixture
+def three_panels(ctrl, files, qapp):
+    ctrl.view.resize(1400, 900)
+    ctrl.view.show()
+    _set_graph(ctrl, files[0].signals[1], 2)
+    _set_graph(ctrl, files[1].signals[1], 3)
+    qapp.processEvents()
+    return ctrl.graph_ctrl
+
+
+def test_splitter_between_panels(three_panels, qapp):
+    graph = three_panels
+    assert len(graph._splitters) == 2
+    heights = _pixel_heights(graph, qapp)
+    assert max(heights) - min(heights) < 3          # hauteurs égales par défaut
+    for splitter in graph._splitters:
+        rect = splitter.sceneBoundingRect()
+        upper = graph.panels[splitter.index].plot.sceneBoundingRect()
+        lower = graph.panels[splitter.index + 1].plot.sceneBoundingRect()
+        assert upper.bottom() - 6 < rect.center().y() < lower.top() + 6
+
+
+def test_drag_splitter_sets_heights(ctrl, three_panels, qapp):
+    graph = three_panels
+    emitted = []
+    graph.heights_changed.connect(emitted.append)
+    first = graph.panels[0].plot.sceneBoundingRect()
+    graph.drag_splitter(0, first.top() + 1.5 * first.height())
+    heights = _pixel_heights(graph, qapp)
+    assert heights[0] == pytest.approx(1.5 * first.height(), rel=0.03)
+    assert heights[1] == pytest.approx(0.5 * first.height(), rel=0.05)
+    assert heights[2] == pytest.approx(first.height(), rel=0.03)  # 3e inchangé
+    # limite : hauteur minimale du graphique du dessous
+    graph.drag_splitter(0, first.top() + 5 * first.height())
+    assert _pixel_heights(graph, qapp)[1] == pytest.approx(graph.MIN_PANEL_HEIGHT, abs=3)
+    # poignées replacées sur la nouvelle limite
+    assert abs(graph._splitters[0].sceneBoundingRect().center().y()
+               - graph.panels[0].plot.sceneBoundingRect().bottom()) < 6
+
+    # fin du glisser : hauteurs enregistrées avec le projet (projet modifié)
+    graph._splitters[0].mouseReleaseEvent(None)
+    assert emitted and ctrl.workspace.graph_heights == emitted[-1]
+    assert ctrl.is_modified()
+
+
+def test_double_click_resets_heights(ctrl, three_panels, qapp):
+    graph = three_panels
+    first = graph.panels[0].plot.sceneBoundingRect()
+    graph.drag_splitter(0, first.top() + 1.5 * first.height())
+    graph._splitters[0].mouseDoubleClickEvent(QtWidgets_event())
+    heights = _pixel_heights(graph, qapp)
+    assert max(heights) - min(heights) < 3
+    assert ctrl.workspace.graph_heights == [1.0, 1.0, 1.0]
+
+
+def QtWidgets_event():
+    """Événement factice : seul accept() est appelé."""
+    class _Event:
+        def accept(self):
+            pass
+    return _Event()
+
+
+def test_heights_saved_in_project(ctrl, three_panels, qapp, tmp_path):
+    graph = three_panels
+    first = graph.panels[0].plot.sceneBoundingRect()
+    graph.drag_splitter(0, first.top() + 1.5 * first.height())
+    graph._splitters[0].mouseReleaseEvent(None)
+    saved = list(ctrl.workspace.graph_heights)
+
+    project = tmp_path / "heights.json"
+    ctrl.workspace.save(project)
+    ctrl.import_ctrl.openProject(str(project))
+    graph = ctrl.graph_ctrl
+    assert ctrl.workspace.graph_heights == saved
+    assert graph.heights() == pytest.approx(saved, abs=0.01)
+    heights = _pixel_heights(graph, qapp)
+    assert heights[0] / heights[2] == pytest.approx(saved[0] / saved[2], rel=0.03)
+
+
+def test_removed_panel_removes_splitter(ctrl, three_panels, files, qapp):
+    graph = three_panels
+    _set_graph(ctrl, files[1].signals[1], 1)
+    assert len(graph.panels) == 2 and len(graph._splitters) == 1
+    heights = _pixel_heights(graph, qapp)
+    assert max(heights) - min(heights) < 3
+
+
+def test_mouse_drag_on_splitter(three_panels, qapp):
+    """Le glisser sur la poignée règle les hauteurs (et ne déplace pas la vue)."""
+    from PyQt6.QtTest import QTest
+    graph = three_panels
+    view = graph.graph
+    before = _pixel_heights(graph, qapp)
+    x_range = graph.main_panel.vb.viewRange()[0]
+    start = view.mapFromScene(graph._splitters[0].sceneBoundingRect().center())
+    end = start + QtCore.QPoint(0, 80)
+    left = QtCore.Qt.MouseButton.LeftButton
+    QTest.mousePress(view.viewport(), left, QtCore.Qt.KeyboardModifier.NoModifier, start)
+    for step in range(1, 5):
+        QTest.mouseMove(view.viewport(), start + QtCore.QPoint(0, 20 * step))
+    QTest.mouseRelease(view.viewport(), left, QtCore.Qt.KeyboardModifier.NoModifier, end)
+    after = _pixel_heights(graph, qapp)
+    assert after[0] == pytest.approx(before[0] + 80, abs=4)
+    assert graph.main_panel.vb.viewRange()[0] == pytest.approx(x_range)

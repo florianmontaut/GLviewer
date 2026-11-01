@@ -650,6 +650,8 @@ class ImportController(QtCore.QObject):
             ws.annotations[annotation.id] = annotation
         # appariement des voies de la vue « Par voie »
         ws.channels_from_dict(data["workspace"].get("channels"))
+        # hauteurs des graphiques empilés (absentes des projets plus anciens)
+        ws.graph_heights = list(data["workspace"].get("graph_heights") or [])
         ws.path = fname
         return ws
 

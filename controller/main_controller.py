@@ -297,6 +297,8 @@ class MainController(QtCore.QObject):
             self.graph_ctrl.remove_signal_curve(sig)
 
         self.workspace=workspace
+        # hauteurs des graphiques du projet (avant la création des graphiques)
+        self.graph_ctrl.set_heights(workspace.graph_heights)
         self.channel_model.workspace = workspace
         self.channel_model.rebuild()
 
@@ -1047,6 +1049,7 @@ class MainController(QtCore.QObject):
 
         # voies glissées depuis un arbre sur un graphique
         self.graph_ctrl.signals_dropped.connect(self._on_signals_dropped)
+        self.graph_ctrl.heights_changed.connect(self._on_graph_heights_changed)
         self.graph_ctrl.curve_selected.connect(
                                                 lambda ctx:
                                                 self.select_from_context(ctx, source="graph")
@@ -1454,6 +1457,11 @@ class MainController(QtCore.QObject):
             self.model.refresh_object(sig)
         self.channel_model.rebuild()
         self._refresh_derived()
+
+    def _on_graph_heights_changed(self, heights):
+        """Hauteurs des graphiques réglées à la souris : enregistrées avec le projet."""
+        self.workspace.graph_heights = list(heights)
+        self._update_title()
 
     def _on_signals_dropped(self, ids, number: int):
         """Voies glissées depuis un arbre et déposées sur le graphique n° number."""

@@ -961,6 +961,8 @@ class Workspace:
         self.path = None
         # textes ajoutés sur le graphique : id -> TextAnnotation
         self.annotations = OrderedDict()
+        # hauteurs relatives des graphiques empilés (1 : hauteur moyenne ; [] : égales)
+        self.graph_heights = []
 
     def add_file(self, file_obj):
         self.files.append(file_obj)
@@ -1014,6 +1016,7 @@ class Workspace:
                             "files": [f.to_dict() for f in self.files],
                             "annotations": [a.to_dict() for a in self.annotations.values()],
                             "channels": self.channels_to_dict(),
+                            "graph_heights": list(self.graph_heights),
                             }
                 }
 
