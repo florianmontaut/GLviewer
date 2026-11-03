@@ -250,6 +250,9 @@ class MainController(QtCore.QObject):
         self.view.addAction(self.undo_action)
         self.view.addAction(self.redo_action)
         self.view.add_history_actions(self.undo_action, self.redo_action)
+        # mêmes raccourcis dans les fenêtres des graphiques détachés
+        self.graph_ctrl.shared_actions = [self.undo_action, self.redo_action,
+                                          self.view.actionSave, self.view.actionSave_to]
 
 
     def add_file(self,file_obj:FileObject):

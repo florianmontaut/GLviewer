@@ -5,8 +5,9 @@ défaut, compatibilité de plot / vb / curves, courbes réparties sur plusieurs 
 une échelle verticale par unité dans un panneau.
 """
 import numpy as np
+import pyqtgraph as pg
 import pytest
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtTest
 
 from controller.plot_panel import PlotPanel, SignalCurveItem
 from helpers import load
@@ -930,8 +931,8 @@ def test_detached_panel_keeps_same_time_range(ctrl, three_panels, qapp):
 def test_text_survives_reattach(ctrl, three_panels, files, qapp):
     """
     Texte avec flèche ajouté dans une fenêtre détachée, puis fenêtre fermée : le texte
-    revient dans la fenêtre principale sans erreur au dessin (pyqtgraph se déconnectait
-    de la scène de la fenêtre, déjà détruite).
+    revient dans la fenêtre principale sans erreur au dessin (pyqtgraph se déconnecte de
+    la scène de la fenêtre, qui doit donc rester valide).
     """
     from PyQt6 import sip
     graph = three_panels
@@ -947,8 +948,8 @@ def test_text_survives_reattach(ctrl, three_panels, files, qapp):
     assert text._lastScene is scene
     window = p2.window
     window.close()
-    # fenêtre détruite (deleteLater) AVANT que le texte soit redessiné
-    sip.delete(window)
+    qapp.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+    assert not sip.isdeleted(scene)
     graph.graph.grab()                              # dessiné dans la fenêtre principale
     assert text.scene() is graph.graph.scene()
     assert text._lastScene is graph.graph.scene()
@@ -957,9 +958,9 @@ def test_text_survives_reattach(ctrl, three_panels, files, qapp):
 def test_cursor_labels_survive_detached_panel_removal(ctrl, three_panels, files, qapp):
     """
     Valeur du curseur souris affichée dans un graphique détaché, puis ce graphique vidé
-    (retiré, fenêtre détruite) : pas d'erreur au dessin suivant.
+    (retiré, fenêtre masquée) : pas d'erreur au dessin suivant, curseur revenu dans un
+    graphique affiché.
     """
-    from PyQt6 import sip
     graph = three_panels
     cursor = graph.graph_tree_ctrl.mouseCursor
     cursor.param('show cursors').setValue(True)
@@ -975,13 +976,146 @@ def test_cursor_labels_survive_detached_panel_removal(ctrl, three_panels, files,
     window.grab()
     assert cursor.valtext._lastScene is window.view.scene()
     _set_graph(ctrl, files[1].signals[1], 1)        # graphique 3 vidé : retiré
-    if not sip.isdeleted(window):
-        sip.delete(window)
-    graph._mouse_panel = graph.main_panel
+    assert not window.isVisible() and graph._mouse_panel is None
     graph._update_cursor(100.0, None)
+    assert cursor.graph is graph.plot
     graph.graph.grab()
     qapp.processEvents()
     assert cursor.valtext._lastScene is graph.graph.scene()
+
+
+def test_text_outside_any_scene_while_window_closes(ctrl, three_panels, qapp):
+    """Texte dessiné dans une fenêtre, retiré le temps de la fermer, puis remis."""
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    window = p2.window
+    window.resize(900, 500)
+    qapp.processEvents()
+    text = pg.TextItem("x")
+    p2.plot.addItem(text)
+    center = p2.vb.viewRect().center()
+    text.setPos(center.x(), center.y())
+    window.grab()
+    assert text._lastScene is window.view.scene()
+    p2.plot.removeItem(text)
+    window.close()
+    qapp.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+    p2.plot.addItem(text)
+    graph.graph.grab()
+    assert text._lastScene is graph.graph.scene()
+
+
+def test_closed_window_is_reused(ctrl, three_panels, files, qapp):
+    """Fenêtre fermée : masquée, puis réutilisée, sans connexion ni dépôt en double."""
+    graph = three_panels
+    p2, p3 = graph.panels[1:]
+    graph.detach_panel(p2)
+    window = p2.window
+    window.close()
+    assert p2.window is None and not window.isVisible() and window.panel is None
+    assert graph._free_windows == [window]
+    proxies = len(graph._scene_proxies)
+
+    graph.detach_panel(p3)
+    assert p3.window is window and window.isVisible() and graph._free_windows == []
+    assert window.windowTitle() == "Graph 3 - GLviewer"
+    assert len(graph._scene_proxies) == proxies
+
+    # deux fenêtres à la fois : une nouvelle est créée
+    graph.detach_panel(p2)
+    assert p2.window is not window and len(graph._scene_proxies) == proxies + 1
+
+    # la croix réintègre le graphique affiché maintenant, une seule fois
+    attached = []
+    original = graph._relayout
+    graph._relayout = lambda: (attached.append(True), original())
+    window.close()
+    assert p3.window is None and len(attached) == 1
+
+
+def test_drop_in_reused_window_targets_current_panel(ctrl, three_panels, files, qapp):
+    from PyQt6 import QtGui
+    from model.base_objects import graph_signals_mime
+    graph = three_panels
+    p2, p3 = graph.panels[1:]
+    graph.detach_panel(p2)
+    window = p2.window
+    window.close()
+    graph.detach_panel(p3)
+    assert p3.window is window
+    data = graph_signals_mime([files[0].signals[0]])
+    pos = QtCore.QPoint(50, 50)
+    args = (QtCore.Qt.DropAction.LinkAction, data, QtCore.Qt.MouseButton.LeftButton,
+            QtCore.Qt.KeyboardModifier.NoModifier)
+    viewport = window.view.viewport()
+    qapp.sendEvent(viewport, QtGui.QDragEnterEvent(pos, *args))
+    qapp.sendEvent(viewport, QtGui.QDropEvent(QtCore.QPointF(pos), *args))
+    assert files[0].signals[0].graph_number == 3
+
+
+def test_clicks_handled_once_after_reuse(ctrl, three_panels, qapp):
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    window = p2.window
+    window.close()
+    graph.detach_panel(p2)
+    assert p2.window is window
+    calls = []
+    original = graph._remember_context_click
+    graph._remember_context_click = lambda ev, scene=None: (calls.append(scene),
+                                                            original(ev, scene))
+
+    class Click:
+        def button(self): return QtCore.Qt.MouseButton.LeftButton
+        def double(self): return False
+        def scenePos(self): return QtCore.QPointF(0, 0)
+    window.view.scene().sigMouseClicked.emit(Click())
+    assert calls == [window.view.scene()]
+
+
+def test_mouse_rate_limited_in_every_window(ctrl, three_panels, qapp):
+    """Mêmes déplacements de souris, même fréquence maximale dans les deux fenêtres."""
+    graph = three_panels
+    p2 = graph.panels[1]
+    graph.detach_panel(p2)
+    p2.window.resize(900, 500)
+    qapp.processEvents()
+    calls = []
+    graph.cursor_moved_X.connect(calls.append)
+    for scene, panel in ((p2.window.view.scene(), p2),
+                         (graph.graph.scene(), graph.main_panel)):
+        calls.clear()
+        center = panel.vb.sceneBoundingRect().center()
+        for _ in range(20):
+            scene.sigMouseMoved.emit(center)
+        assert calls == []                          # différés
+        QtTest.QTest.qWait(100)
+        assert len(calls) == 1 and graph._mouse_panel is panel
+
+
+def test_shortcuts_active_in_detached_window(ctrl, three_panels, qapp):
+    graph = three_panels
+    p2 = graph.panels[1]
+    stack = ctrl.workspace_ctrl.undo_stack
+    graph.detach_panel(p2)
+    window = p2.window
+    for action in (ctrl.view.actionSave, ctrl.view.actionSave_to):
+        assert action in window.actions()
+    window.activateWindow()
+    assert QtTest.QTest.qWaitForWindowActive(window, 1000)
+    index = stack.index()
+    assert index > 0
+    QtTest.QTest.keyClick(window.view, QtCore.Qt.Key.Key_Z,
+                          QtCore.Qt.KeyboardModifier.ControlModifier)
+    assert stack.index() == index - 1
+    QtTest.QTest.keyClick(window.view, QtCore.Qt.Key.Key_Y,
+                          QtCore.Qt.KeyboardModifier.ControlModifier)
+    assert stack.index() == index
+    # touche sans modificateur : sinon Qt retient Ctrl pour les tests suivants (sélection
+    # dans les arbres)
+    QtTest.QTest.keyClick(window.view, QtCore.Qt.Key.Key_Escape)
 
 
 # ---------------- colonne « Graph » des arbres ----------------

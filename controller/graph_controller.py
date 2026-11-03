@@ -40,8 +40,8 @@ class RangePicker(QtCore.QObject):
         self._shortcuts = []
         # tracé de la zone selon le signal (remplacé par le GraphController)
         self.plot_of = lambda signal: plot
+        # clics reçus de GraphController._register_scene
         self._main_scene = self.plot.scene()
-        self._main_scene.sigMouseClicked.connect(self._on_mouse_clicked)
 
     @property
     def is_active(self) -> bool:
@@ -183,13 +183,13 @@ class GraphDropTarget(QtCore.QObject):
     """
     Dépôt sur le graphique de voies glissées depuis un arbre (GRAPH_SIGNALS_MIME) :
     numéro du graphique visé, ou nouveau graphique sous le dernier. Dans la fenêtre d'un
-    graphique détaché (panel), toujours ce graphique.
+    graphique détaché (window), toujours le graphique qu'elle affiche.
     """
 
-    def __init__(self, graph_ctrl, view=None, panel=None):
+    def __init__(self, graph_ctrl, view=None, window=None):
         super().__init__(view if view is not None else graph_ctrl)
         self.graph_ctrl = graph_ctrl
-        self.panel = panel
+        self.window = window
         view = view if view is not None else graph_ctrl.graph
         self.view = view
         view.setAcceptDrops(True)
@@ -206,8 +206,8 @@ class GraphDropTarget(QtCore.QObject):
             return False
         if not event.mimeData().hasFormat(GRAPH_SIGNALS_MIME):
             return False
-        if self.panel is not None:
-            number = self.graph_ctrl.number_of_panel(self.panel)
+        if self.window is not None:
+            number = self.graph_ctrl.number_of_panel(self.window.panel)
         else:
             number = self.graph_ctrl.graph_number_at(
                             self.view.mapToScene(event.position().toPoint()))
@@ -223,7 +223,7 @@ class GraphDropTarget(QtCore.QObject):
 
     def _show(self, number):
         # cadre du graphique visé : fenêtre principale seulement
-        if self.panel is None:
+        if self.window is None:
             self.graph_ctrl.show_drop_target(number)
 
 
@@ -269,12 +269,20 @@ class GraphController(QtCore.QObject):
         self._splitters = []
         # texte affiché à la place des graphiques quand ils sont tous détachés
         self._placeholder = None
+        # fenêtres de graphiques détachés libres, à réutiliser (jamais détruites)
+        self._free_windows = []
+        # déplacements de souris de chaque scène, à fréquence limitée (_register_scene)
+        self._scene_proxies = []
+        # actions à raccourci de la fenêtre principale (Undo, Save...), actives aussi dans
+        # les fenêtres détachées ; données par le MainController
+        self.shared_actions = []
 
         self.old_highlight          = None
         self.reference_sig          = None
         self.macro_recording        = False
         self.vcursor                = None
         self._mouse_pos             = QtCore.QPointF(0,0)
+        self._mouse_panel           = None
 
         # options par défaut de l'objet, le premier init est réalisé
         # par le menu_controller
@@ -315,7 +323,7 @@ class GraphController(QtCore.QObject):
         # du menu contextuel (ex: ajout de texte)
         self._context_scene_pos = None
         self._context_scene = None
-        self.plot.scene().sigMouseClicked.connect(self._remember_context_click)
+        self._register_scene(self.plot.scene())
         # voies glissées depuis un arbre
         self._drop_frame = None
         self.drop_target = GraphDropTarget(self)
@@ -398,6 +406,8 @@ class GraphController(QtCore.QObject):
     def _remove_panel(self, panel):
         if self.graph_tree_ctrl.mouseCursor.graph is panel.plot:
             self.graph_tree_ctrl.mouseCursor.set_graph(self.plot)
+        if self._mouse_panel is panel:
+            self._mouse_panel = None
         if self.range_picker.is_active and self.range_picker.plot is panel.plot:
             self.range_picker.cancel()
         self.panels.remove(panel)
@@ -407,12 +417,8 @@ class GraphController(QtCore.QObject):
         panel.plot.geometryChanged.disconnect(self._place_splitters)
         panel.dispose()
         if panel.window is not None:
-            # graphique détaché devenu vide : sa fenêtre est fermée
-            window, panel.window = panel.window, None
-            window.view.removeItem(panel.plot)
-            self._release_scene(window.view.scene())
-            window.close_silently()
-            window.deleteLater()
+            # graphique détaché devenu vide : sa fenêtre est masquée
+            self._free_window(panel)
         else:
             self.graph.removeItem(panel.plot)
         self._reset_free_rows()
@@ -488,12 +494,11 @@ class GraphController(QtCore.QObject):
             return
         number = self.number_of_panel(panel)
         self.graph.removeItem(panel.plot)
-        window = DetachedGraphWindow(panel, f"Graph {number} - GLviewer", self.graph.window())
+        window = self._take_window()
+        window.assign(panel, f"Graph {number} - GLviewer")
+        window.addActions(self.shared_actions)
         panel.window = window
         window.view.addItem(panel.plot, row=0, col=0)
-        self._connect_scene(window.view.scene())
-        GraphDropTarget(self, window.view, panel)
-        window.closed.connect(self.attach_panel)
         panel.detach_action.setText("Reattach graph")
         self._relayout()
         self._apply_theme()
@@ -501,47 +506,33 @@ class GraphController(QtCore.QObject):
 
     def attach_panel(self, panel):
         """Graphique détaché réintégré à sa place dans la fenêtre principale."""
-        window = panel.window
-        if window is None:
+        if panel.window is None:
             return
-        panel.window = None
-        window.closed.disconnect(self.attach_panel)
-        old_scene = window.view.scene()
-        window.view.removeItem(panel.plot)
-        # fermeture déjà en cours (croix de la fenêtre) : sans effet
-        window.close_silently()
+        self._free_window(panel)
         panel.detach_action.setText("Detach graph")
         self._relayout()
         self._apply_theme()
-        # tracé de retour dans la fenêtre principale : ses textes oublient la scène de la
-        # fenêtre, détruite ensuite
-        self._release_scene(old_scene)
-        window.deleteLater()
 
-    def _release_scene(self, scene):
+    def _take_window(self) -> DetachedGraphWindow:
         """
-        Textes (annotations, étiquettes des curseurs...) détachés de la scène d'une
-        fenêtre qui va être détruite, où qu'ils soient maintenant (fenêtre principale,
-        autre fenêtre détachée). pyqtgraph (TextItem.paint) se déconnecte de la scène
-        précédente au dessin suivant : si elle est déjà détruite, erreur.
+        Fenêtre libre, ou nouvelle. Une fenêtre n'est jamais détruite : pyqtgraph
+        (TextItem.paint) se déconnecte de la scène précédente au dessin suivant, qui doit
+        donc rester valide pour tout texte déjà dessiné dans cette fenêtre.
         """
-        scenes = {id(s): s for s in [self.graph.scene(), scene] + [
-                    p.window.view.scene() for p in self.panels if p.window is not None]}
-        items = [item for living in scenes.values() for item in living.items()]
-        # curseurs des outils graphiques masqués : hors de toute scène
-        tools = self.graph_tree_ctrl
-        for tool_item in (tools.mouseCursor.cursors + [tools.mouseCursor.valtext]
-                          + tools.cursors_H.cursors + tools.cursors_V.cursors):
-            items += [tool_item] + tool_item.childItems()
-        for item in items:
-            if (not isinstance(item, pg.TextItem)
-                    or getattr(item, "_lastScene", None) is not scene):
-                continue
-            try:
-                scene.sigPrepareForPaint.disconnect(item.updateTransform)
-            except (TypeError, RuntimeError):
-                pass
-            item._lastScene = None
+        if self._free_windows:
+            return self._free_windows.pop()
+        window = DetachedGraphWindow(self.graph.window())
+        self._register_scene(window.view.scene())
+        GraphDropTarget(self, window.view, window)
+        window.closed.connect(self.attach_panel)
+        return window
+
+    def _free_window(self, panel):
+        """Fenêtre du graphique détaché panel masquée, sans le graphique."""
+        window, panel.window = panel.window, None
+        window.view.removeItem(panel.plot)
+        window.release()
+        self._free_windows.append(window)
 
     def attach_all(self):
         """Tous les graphiques réintégrés (fermeture de la fenêtre principale)."""
@@ -578,9 +569,14 @@ class GraphController(QtCore.QObject):
             layout.removeItem(self._placeholder)
             self._placeholder = None
 
-    def _connect_scene(self, scene):
-        """Souris dans la scène d'une fenêtre détachée : comme dans la fenêtre principale."""
-        scene.sigMouseMoved.connect(lambda pos, s=scene: self._on_mouse_moved((pos,), s))
+    def _register_scene(self, scene):
+        """
+        Souris dans une scène (fenêtre principale ou graphique détaché) : tout traitement
+        de la souris se connecte ici, une seule fois par scène.
+        """
+        self._scene_proxies.append(pg.SignalProxy(
+                scene.sigMouseMoved, rateLimit=50,
+                slot=lambda args, s=scene: self._on_mouse_moved(args, s)))
         scene.sigMouseClicked.connect(lambda ev, s=scene: self._remember_context_click(ev, s))
         scene.sigMouseClicked.connect(
                 lambda ev, s=scene: self.range_picker._on_mouse_clicked(ev, s))
@@ -967,8 +963,6 @@ class GraphController(QtCore.QObject):
         # textes : panneau de leur numéro de graphique (créé si besoin : projet relu)
         self.graph_tree_ctrl.plot_for_graph = lambda number: self.panel_number(number).plot
         self.graph_tree_ctrl.annotations_removed = self.trim_panels
-        self.proxy = pg.SignalProxy(self.plot.scene().sigMouseMoved,rateLimit = 50,
-                                    slot = self._on_mouse_moved)
         self.graph_tree_ctrl.mouseCursor.param('snap to selected signal').sigValueChanged.connect(
                                     lambda param, value: self.snap_toggled.emit(bool(value)))
 
@@ -977,30 +971,6 @@ class GraphController(QtCore.QObject):
         """Couleur du curseur souris : celle de la courbe sélectionnée (si accroché)."""
         self.graph_tree_ctrl.mouseCursor.setCurve(curve)
 
-
-    def _setup_mouse_guard(self):
-
-        self._mouse_active = False
-        self.plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
-        self.plot.scene().sigMouseClicked.connect(self._on_scene_mouse_clicked)
-
-
-    def _on_scene_mouse_clicked(self, ev):
-        pos = ev.scenePos()
-
-        if self.panel_at(pos) is not None:
-            # clic dans le graphe
-            if ev.button() == QtCore.Qt.MouseButton.LeftButton:
-                self._mouse_active = True
-                ev.accept()
-                return
-            elif ev.button() == QtCore.Qt.MouseButton.RightButton:
-                self._mouse_active = False
-                ev.accept()
-                return
-        else:
-            # clic hors graphe
-            self._mouse_active = False
 
     def _on_mouse_moved(self, ev, scene=None):
         # Garde 2: souris sur le viewbox ?
@@ -1023,7 +993,7 @@ class GraphController(QtCore.QObject):
         if y is None:
             # curseur libre : il suit la souris, dans le panneau survolé
             y = float(self._mouse_pos.y())
-            panel = getattr(self, "_mouse_panel", None) or self.main_panel
+            panel = self._mouse_panel or self.main_panel
             cursor.set_graph(panel.plot)
             cursor.mouseUpdate(x, y)
             return
