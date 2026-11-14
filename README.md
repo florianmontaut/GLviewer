@@ -17,6 +17,12 @@ Ce qu'on peut faire :
 ## Lancer l'application
 
 Environnement validé : Python 3.11, versions dans [requirements.txt](requirements.txt).
+Le moteur de formules des voies calculées est un paquet à part,
+[formules](https://github.com/florianmontaut/formules), à installer avant `requirements.txt` :
+
+```bash
+pip install git+https://github.com/florianmontaut/formules@v0.1.0
+```
 
 ```bash
 ../../env/Scripts/python.exe main.py
@@ -43,7 +49,7 @@ Les pages sont dans [docs/architecture/](docs/architecture/). Lis-les dans cet o
 | [01 · Modèle de données](docs/architecture/01-modele-donnees.md) | `Workspace`, `FileObject`, `SignalObject`, signaux dérivés, `TreeItem` |
 | [02 · Pipeline non destructif](docs/architecture/02-pipeline.md) | Signaux bruts, `FilterNode`, cache et recalcul en chaîne |
 | [03 · Analyses](docs/architecture/03-analyses.md) | `AnalysisNode`, modèle thermique, FFT, différence externe, Benchmark |
-| [04 · Voies calculées](docs/architecture/04-voies-calculees.md) | `ComputedSignal` et le package `model/formula` |
+| [04 · Voies calculées](docs/architecture/04-voies-calculees.md) | `ComputedSignal` et le paquet `formules` |
 | [05 · Undo / redo](docs/architecture/05-undo-redo.md) | `WorkspaceController`, `ActionRegistry`, commandes, macros |
 | [06 · Import](docs/architecture/06-import.md) | Graphtec `.csv`, `.csv` générique, `.txt` et assistant d'import |
 | [07 · Projet `.json`](docs/architecture/07-projet-json.md) | Sauvegarde, relecture, compatibilité des anciens projets |
