@@ -1179,7 +1179,7 @@ class FormulaDialog(QDialog):
             check    : callable(params) -> (formule valide, message)
             defaults : paramètres initiaux (formula, name, unit, time_base, period)
             units    : {texte inséré : unité de la voie}, affichée dans la liste
-            analyse  : callable(params) -> UnitReport (model.formula.units) ou None
+            analyse  : callable(params) -> UnitReport (formules.units) ou None
         """
         from PyQt6.QtWidgets import (QComboBox, QListWidget, QListWidgetItem, QHBoxLayout,
                                      QPushButton)
@@ -1305,7 +1305,7 @@ class FormulaDialog(QDialog):
 
     def _update_unit(self, valid: bool):
         """Unité calculée, comparée à l'unité saisie ; incohérences et remarques."""
-        from model.formula import units
+        from formules import units
         report = self.analyse(self.params()) if self.analyse is not None and valid else None
         self.computed_unit = ""
         if report is None:
@@ -1338,7 +1338,7 @@ class FormulaDialog(QDialog):
 
 class FluidDialog(QDialog):
     """
-    Caloporteurs (model.formula.fluids) : propriété de l'eau ou de l'air à une température
+    Caloporteurs (formules.fluids) : propriété de l'eau ou de l'air à une température
     (rho_water([T])...), ou puissance échangée débit × ρ × cp × (T sortie - T entrée),
     le débit étant converti en SI d'après son unité.
     """
@@ -1352,7 +1352,7 @@ class FluidDialog(QDialog):
             units    : {voie : unité} ; unité du débit préremplie
         """
         from PyQt6.QtWidgets import QComboBox, QHBoxLayout
-        from model.formula import fluids
+        from formules import fluids
         super().__init__(parent)
         self.fluids = fluids
         self.units = dict(units or {})
@@ -1441,7 +1441,7 @@ class FluidDialog(QDialog):
 
     def flow_factor(self) -> tuple[str, str]:
         """(conversion en SI écrite dans la formule : « /60000 » ou « », « volume » / « mass »)."""
-        from model.formula import units
+        from formules import units
         text = self.flow_unit.text().strip()
         if not text:
             raise ValueError("Indiquez l'unité du débit (L/min, m³/h, kg/s...)")
@@ -1517,7 +1517,7 @@ class LutDialog(QDialog):
             channels : entrées proposées (time, [T AMB]...) ; time par défaut
         """
         from PyQt6.QtWidgets import QComboBox, QHBoxLayout, QPushButton, QHeaderView
-        from model.formula import lut
+        from formules import lut
         super().__init__(parent)
         self.lut = lut
         self.setWindowTitle("Look-up table")

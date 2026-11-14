@@ -12,7 +12,7 @@ from helpers import add
 from model.analysis.thermal import ThermalModelAnalysis, thermal_step
 from model.filters.lowpass import LowPassFilter
 from model.filters.moving_average import MovingAverageFilter
-from model.formula import evaluate, parse
+from formules import evaluate, parse
 from model.missing_data import display_values, fill_gaps, valid_on
 from ressources.custom_types import qSignalType as T
 from test_hz_channels import N, _smooth, write_gl820

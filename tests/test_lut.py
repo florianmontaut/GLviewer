@@ -9,8 +9,8 @@ import pytest
 from PyQt6 import QtWidgets
 
 from helpers import load
-from model.formula import FormulaError, evaluate, parse
-from model.formula.lut import format_call, parse_rows
+from formules import FormulaError, evaluate, parse
+from formules.lut import format_call, parse_rows
 from test_computed_channels import channel, dialog, files  # noqa: F401 (fixtures)
 
 T = np.array([0.0, 100.0, 200.0, 200.5, 201.0, 300.0, 500.0])
