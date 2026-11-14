@@ -39,7 +39,7 @@ from controller.commands.channel_link import (ChannelLinkCommand, ChannelMatchin
 from ressources.custom_dialogs import (ChannelMatchingDialog, FormulaDialog,
                                       PowerSourceDialog)
 from model.computed import ComputedSignal
-from model.formula import FormulaError
+from formules import FormulaError
 from controller.commands.computed_channel import (AddComputedChannelCommand,
                                                   RemoveComputedChannelCommand,
                                                   ModifyComputedChannelCommand)
@@ -1605,10 +1605,10 @@ class MainController(QtCore.QObject):
     @staticmethod
     def formula_units(file_obj, params, current=None):
         """
-        Unité de la formule (model.formula.units.UnitReport), d'après les unités des voies
+        Unité de la formule (formules.units.UnitReport), d'après les unités des voies
         utilisées ; None si la formule est invalide.
         """
-        from model.formula import units
+        from formules import units
         try:
             trial = ComputedSignal(file_obj, replaces=current, **{"name": "Formula", **params})
             inputs = trial.inputs()

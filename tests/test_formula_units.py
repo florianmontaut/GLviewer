@@ -1,11 +1,11 @@
 # tests/test_formula_units.py
-"""Homogénéité des formules (model.formula.units) et caloporteurs (model.formula.fluids)."""
+"""Homogénéité des formules (formules.units) et caloporteurs (formules.fluids)."""
 import numpy as np
 import pytest
 from PyQt6 import QtCore, QtWidgets
 
 from helpers import load
-from model.formula import FormulaError, evaluate, fluids, parse, units
+from formules import FormulaError, evaluate, fluids, parse, units
 
 
 @pytest.fixture

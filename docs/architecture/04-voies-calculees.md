@@ -16,10 +16,18 @@ comparer dans le Benchmark. Seules ses données brutes sont calculées.
 
 | Couche | Fichiers | Rôle |
 |---|---|---|
-| Langage de formule | [model/formula/](../../model/formula/) | Analyse et évaluation d'un texte, sans rien savoir de GLviewer |
+| Langage de formule | paquet [formules](https://github.com/florianmontaut/formules) | Analyse et évaluation d'un texte, sans rien savoir de GLviewer |
 | Voie calculée | [model/computed.py](../../model/computed.py) : `ComputedSignal(SignalObject)` | Résout les voies citées, choisit la base de temps, met le résultat en cache, le sauvegarde |
 
-### `model/formula` : lexer → parser → interpréteur
+### `formules` : lexer → parser → interpréteur
+
+Le langage de formule est un paquet à part, [formules](https://github.com/florianmontaut/formules), commun à GLviewer et à
+loggerFPGA. Il vivait dans `model/formula` jusqu'à sa sortie du dépôt. Il s'installe depuis son
+étiquette de version, avant `requirements.txt` :
+
+```
+pip install git+https://github.com/florianmontaut/formules@v0.1.0
+```
 
 ```mermaid
 flowchart LR
@@ -32,19 +40,22 @@ flowchart LR
     U --> UR["UnitReport : unité du résultat,<br/>incohérences"]
 ```
 
-- **API publique** ([`__init__.py`](../../model/formula/__init__.py)) : `parse(text)`, `references(tree)`,
+- **API publique** ([`__init__.py`](https://github.com/florianmontaut/formules/blob/v0.1.0/src/formules/__init__.py)) : `parse(text)`, `references(tree)`,
   `evaluate(tree, variables)`, `units.analyse(...)` et `FormulaError`.
-- **Grammaire** (en tête de [parser.py](../../model/formula/parser.py)) : `+ - * / ^`, fonctions, `[noms entre
+- **Grammaire** (en tête de [parser.py](https://github.com/florianmontaut/formules/blob/v0.1.0/src/formules/parser.py)) : `+ - * / ^`, fonctions, `[noms entre
   crochets]`, identifiants (`CH3`, `time`). Les arguments sont séparés par `;`.
 - **Sémantique numpy** : sur des tableaux, un échantillon invalide donne `nan` / `inf` sans arrêter le calcul. Sur
   des scalaires, une erreur de domaine lève une exception.
 - **Fonctions** : `sin`, `cos`, `exp`, `log`, `sqrt`, `abs`, `min`, `max`, `avg`… On y trouve aussi les tables de
-  correspondance [`steps` / `interp`](../../model/formula/lut.py) et les propriétés des caloporteurs
-  [`rho_water`, `cp_air`…](../../model/formula/fluids.py) (eau de 0 à 100 °C, air sec de −73 à 226 °C, `nan` hors
+  correspondance [`steps` / `interp`](https://github.com/florianmontaut/formules/blob/v0.1.0/src/formules/lut.py) et les propriétés des caloporteurs
+  [`rho_water`, `cp_air`…](https://github.com/florianmontaut/formules/blob/v0.1.0/src/formules/fluids.py) (eau de 0 à 100 °C, air sec de −73 à 226 °C, `nan` hors
   de ces plages).
-- **Unités** ([units.py](../../model/formula/units.py)) : l'analyse dimensionnelle n'est faite que pour informer.
+- **Unités** ([units.py](https://github.com/florianmontaut/formules/blob/v0.1.0/src/formules/units.py)) : l'analyse dimensionnelle n'est faite que pour informer.
   Elle vérifie l'homogénéité (°C et K ont la même dimension), mais pas les facteurs numériques (`/60`, `*1000`).
-- Le package vient du projet LEXER. Ses tests sont `tests/test_formula_*.py`.
+- **Erreurs** : `FormulaError` est une `ValueError`. Elle n'hérite plus d'`AnalysisError`, que le paquet ne
+  connaît pas ; les traitements qui attrapent `AnalysisError` attrapent aussi `ValueError`.
+- Le paquet vient du projet LEXER. Les tests du moteur seul sont dans son dépôt ; ceux qui passent par
+  l'interface de GLviewer restent ici (`tests/test_formula_units.py`, `tests/test_lut.py`).
 
 ### `ComputedSignal`
 

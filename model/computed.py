@@ -20,14 +20,14 @@ Désignation des voies :
     CH3             voie du fichier hôte par son numéro (GL) ou par un nom sans espace
     time            temps (s)
 
-Tables de correspondance (model.formula.lut) : steps(time; 0; 200; 201; 800) donne une
+Tables de correspondance (formules.lut) : steps(time; 0; 200; 201; 800) donne une
 puissance par paliers, interp([V]; 0; -40; 5; 150) une courbe d'étalonnage.
 """
 import numpy as np
 
 from model.base_objects import SignalObject, MAX_GRAPHS
 from model.channels import channel_key
-from model.formula import FormulaError, evaluate, parse, references
+from formules import FormulaError, evaluate, parse, references
 from ressources import custom_struct_functions
 
 HOST_TIME_BASE = "Host file"
